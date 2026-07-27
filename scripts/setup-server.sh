@@ -46,10 +46,10 @@ sudo chown -R "$DEPLOY_USER":"$DEPLOY_USER" "$PROJECT_DIR"
 echo "=== 6. Clonando los repositorios ==="
 sudo -u "$DEPLOY_USER" bash -c "
   cd $PROJECT_DIR
-  [ -d techo360-frontend ]   || git clone https://github.com/$GITHUB_USER/techo360-frontend.git
-  [ -d techo360-backend ]    || git clone https://github.com/$GITHUB_USER/techo360-backend.git
-  [ -d techo360-ai-service ] || git clone https://github.com/$GITHUB_USER/techo360-ai-service.git
-  [ -d techo360-infra ]      || git clone https://github.com/$GITHUB_USER/techo360-infra.git
+  [ -d techo360-frontend ]   || git clone git@github.com:$GITHUB_USER/techo360-frontend.git
+  [ -d techo360-backend ]    || git clone git@github.com:$GITHUB_USER/techo360-backend.git
+  [ -d techo360-ai-service ] || git clone git@github.com:$GITHUB_USER/techo360-ai-service.git
+  [ -d techo360-infra ]      || git clone git@github.com:$GITHUB_USER/techo360-infra.git
 "
 
 echo "=== 7. Recordatorio final ==="
