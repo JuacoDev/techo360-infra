@@ -62,12 +62,23 @@ docker compose -f "$COMPOSE_FILE" build "$SERVICE"
 echo "--- 4. Reiniciando SOLO el contenedor de $SERVICE (los demas no se tocan) ---"
 docker compose -f "$COMPOSE_FILE" up -d --no-deps "$SERVICE"
 
-echo "--- 5. Verificando salud de $SERVICE ---"
-sleep 8
-if docker compose -f "$COMPOSE_FILE" ps --status running | grep -q "techo360-${SERVICE}"; then
+echo "--- 5. Verificando salud de $SERVICE (con reintentos) ---"
+HEALTHY=false
+for i in 1 2 3 4 5 6; do
+  sleep 5
+  if docker compose -f "$COMPOSE_FILE" ps --status running | grep -q "techo360-${SERVICE}"; then
+    HEALTHY=true
+    break
+  fi
+  echo "Intento $i: $SERVICE aun no responde, reintentando..."
+done
+
+if [ "$HEALTHY" = true ]; then
   echo "=== Deploy de $SERVICE completado con exito: $(date) ==="
 else
-  echo "!!! ERROR: $SERVICE no quedo arriba. Ejecutando rollback SOLO de este servicio. !!!"
+  echo "!!! ERROR: $SERVICE no quedo arriba tras varios intentos. Mostrando estado actual: !!!"
+  docker compose -f "$COMPOSE_FILE" ps
+  echo "Ejecutando rollback SOLO de este servicio."
   "$INFRA_DIR/scripts/rollback-service.sh" "$SERVICE"
   exit 1
 fi
