@@ -81,3 +81,5 @@ docker compose -f docker-compose.dev-db.yml down   # apagarlo cuando no se neces
   sin arriesgar la demo con cambios de último momento.
 
 <!-- Prueba de despliegue automatico: 2026-07-27 11:04:16 -->
+
+<!-- Prueba 2 de despliegue: 2026-07-27 11:13:56 -->
