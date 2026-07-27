@@ -1,12 +1,8 @@
-# Secrets
+# Variables de entorno reales (nunca se suben, solo .env.example)
 .env
 
-# Backups
+# Respaldos y logs generados en el servidor
 backups/
-
-# Logs
+logs/
+*.sql.gz
 *.log
-
-# Editor / OS
-.vscode/
-.DS_Store

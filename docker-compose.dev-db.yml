@@ -1,0 +1,43 @@
+# ============================================================
+# Techo 360 - Postgres de DESARROLLO/pruebas
+# ------------------------------------------------------------
+# Este archivo levanta un segundo Postgres aislado, separado
+# del de produccion, para que Base de Datos pruebe cambios de
+# esquema antes de integrarlos al Postgres real.
+#
+# Uso:
+#   docker compose -f docker-compose.dev-db.yml up -d
+#   (se apaga cuando no se necesite, no debe quedar corriendo
+#   permanentemente por el limite de RAM del servidor)
+#
+# Acceso remoto controlado: conectar con pgAdmin/DBeaver usando
+# la IP de Tailscale del servidor y el puerto 55432.
+# ============================================================
+
+name: techo360-dev-db
+
+networks:
+  techo360-dev-net:
+    driver: bridge
+
+volumes:
+  pg_dev_data:
+
+services:
+  postgres-dev:
+    image: postgis/postgis:16-3.4
+    container_name: techo360-postgres-dev
+    restart: "no"
+    environment:
+      POSTGRES_DB: ${DEV_POSTGRES_DB:-techo360_dev}
+      POSTGRES_USER: ${DEV_POSTGRES_USER:-techo360_dev_user}
+      POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD}
+    volumes:
+      - pg_dev_data:/var/lib/postgresql/data
+    ports:
+      # Puerto distinto al de produccion (5432) para no chocar
+      - "55432:5432"
+    networks:
+      - techo360-dev-net
+    mem_limit: 512m
+    cpus: 0.5

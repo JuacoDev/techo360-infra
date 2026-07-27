@@ -1,0 +1,19 @@
+name: Deploy Techo 360 - Infraestructura
+
+# Se activa cuando cambia algo en ESTE repo (docker-compose.yml,
+# .env.example, scripts, limites de recursos, etc.)
+on:
+  push:
+    branches: [development]
+
+jobs:
+  deploy-infra:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout del codigo
+        uses: actions/checkout@v4
+
+      - name: Aplicar cambios de infraestructura
+        run: |
+          chmod +x scripts/deploy-infra.sh
+          ./scripts/deploy-infra.sh
