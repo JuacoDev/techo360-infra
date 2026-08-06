@@ -46,18 +46,32 @@ afectarlos a todos.
 
 ## Arquitectura desplegada
 
+**Puertos aprobados por el CCA para acceso desde fuera del campus:**
+22 (ssh-sftp), 80 (http), 443 (https), 5432 (postgresql), ping/snmp.
+Por eso `backend` y `chatbot` NO exponen puerto propio — `frontend`
+(Nginx) hace de reverse proxy y enruta `/api/` y `/chatbot/` hacia
+ellos internamente. El puerto 5432 está disponible pero de momento
+ninguna base de datos lo usa (ver nota más abajo).
+
 | Contenedor | Rol | Puerto expuesto |
 |---|---|---|
-| `frontend` | React, sirve su propio contenido | 80 |
-| `backend` | Mapa de calor, autenticación, actualización de datos | 8000 |
-| `chatbot` | LLM propio + RAG (pgvector) | 8001 |
-| `proyeccion` | Modelo LightGBM (series de tiempo) | — (solo interno, vía RabbitMQ) |
-| `postgres-principal` | PostgreSQL + PostGIS | — (solo interno) |
-| `postgres-vector` | PostgreSQL + pgvector (compartida chatbot/proyeccion) | — (solo interno) |
-| `postgres-users` | PostgreSQL (usuarios, roles, logs) | — (solo interno) |
-| `redis` | Cache + OTP | — (solo interno) |
+| `frontend` | React + Nginx (sirve la SPA y hace de reverse proxy hacia backend/chatbot) | 80 (443 cuando haya DNS/TLS) |
+| `backend` | Mapa de calor, autenticación, actualización de datos | — (interno, vía proxy del frontend) |
+| `chatbot` | LLM propio + RAG (pgvector) | — (interno, vía proxy del frontend) |
+| `proyeccion` | Modelo LightGBM (series de tiempo) | — (interno, solo vía RabbitMQ) |
+| `postgres-principal` | PostgreSQL + PostGIS | — (interno) |
+| `postgres-vector` | PostgreSQL + pgvector (compartida chatbot/proyeccion) | — (interno) |
+| `postgres-users` | PostgreSQL (usuarios, roles, logs) | — (interno) |
+| `redis` | Cache + OTP | — (interno) |
 | `rabbitmq` | Broker de colas | — (panel admin no expuesto por defecto) |
-| `ollama` | LLM local (CPU-only, sin GPU en este VPS) | — (solo interno) |
+| `ollama` | LLM local (CPU-only, sin GPU en este VPS) | — (interno) |
+
+**Nota sobre el puerto 5432:** el CCA lo aprobó para que alguna base de
+datos pueda administrarse remotamente (pgAdmin/DBeaver) sin pasar por
+Tailscale. De momento ninguna de las 3 bases lo usa — decidir cuál (si
+alguna) conviene exponer así, considerando que Postgres expuesto
+directo a internet es un blanco de fuerza bruta si no se refuerza bien
+la contraseña.
 
 ## Scripts
 

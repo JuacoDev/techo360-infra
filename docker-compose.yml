@@ -7,6 +7,17 @@ name: techo360
 # servicio (ej. "postgres-principal", "rabbitmq"). Nada queda
 # expuesto al host salvo lo estrictamente necesario.
 #
+# PUERTOS APROBADOS POR EL CCA (unicos habilitados hacia
+# internet, fuera del campus): 22 (ssh-sftp), 80 (http),
+# 443 (https), 5432 (postgresql), ademas de ping/snmp.
+# Por eso backend y chatbot NO exponen puerto propio: el
+# "frontend" (Nginx) hace de reverse proxy y enruta /api/ y
+# /chatbot/ hacia ellos internamente, todo por el puerto 80/443.
+# El puerto 5432 esta disponible si en algun momento se decide
+# exponer una de las 3 bases para administracion remota directa
+# (pgAdmin/DBeaver) -- de momento ninguna lo usa, ver nota en el
+# servicio de base de datos que se quiera exponer.
+#
 # PRESUPUESTO DE RAM (VPS: 8GB, 2 cores, SIN GPU):
 #   postgres-principal   512m
 #   postgres-vector      512m
@@ -185,12 +196,13 @@ services:
         condition: service_started
       rabbitmq:
         condition: service_started
-    ports:
-      - "8000:8000"
     networks:
       - techo360-net
     mem_limit: 512m
     cpus: 0.3
+    # Sin puertos publicos: el frontend lo consume internamente por nombre
+    # de servicio (proxy_pass http://backend:8000/), segun los puertos
+    # aprobados por el CCA (solo 22/80/443/5432 hacia internet).
 
   # ---------------------------------------------------------------
   # Servicio IA - Chatbot: LLM propio (Ollama) + RAG sobre pgvector
@@ -213,12 +225,12 @@ services:
         condition: service_started
       ollama:
         condition: service_started
-    ports:
-      - "8001:8000"
     networks:
       - techo360-net
     mem_limit: 512m
     cpus: 0.3
+    # Sin puertos publicos: mismo criterio que el backend, se consume
+    # internamente via el proxy del frontend (proxy_pass http://chatbot:8000/).
 
   # ---------------------------------------------------------------
   # Servicio IA - Proyeccion: modelo LightGBM (series de tiempo)
@@ -246,7 +258,10 @@ services:
     # RabbitMQ (a traves del chatbot), segun la arquitectura definida.
 
   # ---------------------------------------------------------------
-  # Frontend (React) — sirve su propio contenido en el puerto 80
+  # Frontend (React) — sirve la SPA y ademas hace de reverse proxy
+  # hacia backend/chatbot (ver nginx.conf DENTRO del repo
+  # techo360-frontend), para no tener que abrir mas puertos que
+  # los aprobados por el CCA (80/443)
   # ---------------------------------------------------------------
   frontend:
     build:
@@ -259,6 +274,7 @@ services:
       - chatbot
     ports:
       - "80:80"
+      # - "443:443"  # descomentar cuando el CTIC entregue el DNS y haya certificado TLS
     networks:
       - techo360-net
     mem_limit: 128m
