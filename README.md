@@ -135,3 +135,5 @@ docker compose -f docker-compose.dev-db.yml down   # apagarlo cuando no se neces
 - Etiquetas congeladas (ej. `sprint1-demo`): creadas con `freeze-tag.sh` antes
   de una entrega, para que el equipo pueda seguir haciendo push a `development`
   sin arriesgar la demo con cambios de último momento.
+
+<!-- prueba CI/CD -->
