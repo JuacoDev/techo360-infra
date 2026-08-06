@@ -4,8 +4,30 @@ name: techo360
 # Techo 360 - Orquestacion principal de contenedores
 # ------------------------------------------------------------
 # Red interna unica: los contenedores se hablan por nombre de
-# servicio (ej. "postgres", "redis"). Nada queda expuesto al
-# host salvo lo estrictamente necesario (frontend y backend).
+# servicio (ej. "postgres-principal", "rabbitmq"). Nada queda
+# expuesto al host salvo lo estrictamente necesario.
+#
+# PRESUPUESTO DE RAM (VPS: 8GB, 2 cores, SIN GPU):
+#   postgres-principal   512m
+#   postgres-vector      512m
+#   postgres-users       256m
+#   redis                128m
+#   rabbitmq             256m
+#   backend              512m
+#   chatbot              512m   (el proceso FastAPI; el LLM corre aparte, en Ollama)
+#   proyeccion           512m
+#   frontend             128m
+#   ollama              3072m   (LLM local, CPU-only -> ver nota mas abajo)
+#   ---------------------------------
+#   TOTAL asignado      6400m  (~6.25GB de 8GB, deja margen para el SO)
+#
+# NOTA IMPORTANTE SOBRE OLLAMA: este VPS no tiene GPU. Un modelo
+# de 7-8B parametros corriendo solo por CPU puede acercarse o
+# superar el limite de 3072m y ademas responde lento. Usar un
+# modelo pequeno (1-3B, ej. llama3.2:3b o phi3:mini) para lo que
+# corra AQUI en produccion. El entrenamiento/experimentacion con
+# modelos mas grandes se hace en las GPUs locales del equipo, no
+# en este servidor.
 # ============================================================
 
 networks:
@@ -13,31 +35,82 @@ networks:
     driver: bridge
 
 volumes:
-  pg_data:
+  pg_principal_data:
+  pg_vector_data:
+  pg_users_data:
+  rabbitmq_data:
+  ollama_data:
 
 services:
 
-  postgres:
+  # ---------------------------------------------------------------
+  # Bases de datos (3 independientes, segun la arquitectura definida)
+  # ---------------------------------------------------------------
+  postgres-principal:
     image: postgis/postgis:16-3.4
-    container_name: techo360-postgres
+    container_name: techo360-postgres-principal
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${DB_PRINCIPAL_NAME}
+      POSTGRES_USER: ${DB_PRINCIPAL_USER}
+      POSTGRES_PASSWORD: ${DB_PRINCIPAL_PASSWORD}
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - pg_principal_data:/var/lib/postgresql/data
     networks:
       - techo360-net
-    mem_limit: 1024m
-    cpus: 0.75
+    mem_limit: 512m
+    cpus: 0.35
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_PRINCIPAL_USER} -d ${DB_PRINCIPAL_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 5
     # No se expone puerto al host: solo accesible dentro de techo360-net
 
+  postgres-vector:
+    image: pgvector/pgvector:pg16
+    container_name: techo360-postgres-vector
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_VECTOR_NAME}
+      POSTGRES_USER: ${DB_VECTOR_USER}
+      POSTGRES_PASSWORD: ${DB_VECTOR_PASSWORD}
+    volumes:
+      - pg_vector_data:/var/lib/postgresql/data
+      - ./db-init/pgvector-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - techo360-net
+    mem_limit: 512m
+    cpus: 0.35
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_VECTOR_USER} -d ${DB_VECTOR_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-users:
+    image: postgres:16-alpine
+    container_name: techo360-postgres-users
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_USERS_NAME}
+      POSTGRES_USER: ${DB_USERS_USER}
+      POSTGRES_PASSWORD: ${DB_USERS_PASSWORD}
+    volumes:
+      - pg_users_data:/var/lib/postgresql/data
+    networks:
+      - techo360-net
+    mem_limit: 256m
+    cpus: 0.2
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERS_USER} -d ${DB_USERS_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------
+  # Cache / colas
+  # ---------------------------------------------------------------
   redis:
     image: redis:7.2-alpine
     container_name: techo360-redis
@@ -45,9 +118,52 @@ services:
     networks:
       - techo360-net
     mem_limit: 128m
-    cpus: 0.25
-    # Cache puro, sin necesidad de volumen persistente
+    cpus: 0.15
+    # Cache + OTP, sin necesidad de volumen persistente
 
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: techo360-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - techo360-net
+    mem_limit: 256m
+    cpus: 0.2
+    # Panel de administracion (15672) NO se expone al host por defecto;
+    # usar Tailscale + port-forward manual si se necesita entrar a verlo.
+
+  # ---------------------------------------------------------------
+  # LLM local (Ollama) para el Chatbot
+  # ---------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: techo360-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - techo360-net
+    mem_limit: 3072m
+    cpus: 1.0
+    # Este servidor NO tiene GPU. Si en algun momento se despliega en
+    # un servidor con GPU NVIDIA, descomentar:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ---------------------------------------------------------------
+  # Backend Principal: mapa de calor, autenticacion, actualizacion
+  # automatica de datos (TerriData/DANE)
+  # ---------------------------------------------------------------
   backend:
     build:
       context: ../techo360-backend
@@ -56,33 +172,82 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://${DB_PRINCIPAL_USER}:${DB_PRINCIPAL_PASSWORD}@postgres-principal:5432/${DB_PRINCIPAL_NAME}
+      DATABASE_USERS_URL: postgresql://${DB_USERS_USER}:${DB_USERS_PASSWORD}@postgres-users:5432/${DB_USERS_NAME}
       REDIS_URL: redis://redis:6379/0
-      AI_SERVICE_URL: http://ai-service:8001
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
     depends_on:
-      postgres:
+      postgres-principal:
+        condition: service_healthy
+      postgres-users:
         condition: service_healthy
       redis:
+        condition: service_started
+      rabbitmq:
         condition: service_started
     ports:
       - "8000:8000"
     networks:
       - techo360-net
     mem_limit: 512m
-    cpus: 0.5
+    cpus: 0.3
 
-  ai-service:
+  # ---------------------------------------------------------------
+  # Servicio IA - Chatbot: LLM propio (Ollama) + RAG sobre pgvector
+  # ---------------------------------------------------------------
+  chatbot:
     build:
-      context: ../techo360-ai-service
-    image: techo360/ai-service:${TAG:-dev}
-    container_name: techo360-ai-service
+      context: ../techo360-chatbot
+    image: techo360/chatbot:${TAG:-dev}
+    container_name: techo360-chatbot
     restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_VECTOR_URL: postgresql://${DB_VECTOR_USER}:${DB_VECTOR_PASSWORD}@postgres-vector:5432/${DB_VECTOR_NAME}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      OLLAMA_URL: http://ollama:11434
+    depends_on:
+      postgres-vector:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      ollama:
+        condition: service_started
+    ports:
+      - "8001:8000"
     networks:
       - techo360-net
-    mem_limit: 768m
-    cpus: 0.5
-    # Sin puertos publicos: el backend lo consume internamente por nombre de servicio
+    mem_limit: 512m
+    cpus: 0.3
 
+  # ---------------------------------------------------------------
+  # Servicio IA - Proyeccion: modelo LightGBM (series de tiempo)
+  # ---------------------------------------------------------------
+  proyeccion:
+    build:
+      context: ../techo360-proyeccion
+    image: techo360/proyeccion:${TAG:-dev}
+    container_name: techo360-proyeccion
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_VECTOR_URL: postgresql://${DB_VECTOR_USER}:${DB_VECTOR_PASSWORD}@postgres-vector:5432/${DB_VECTOR_NAME}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+    depends_on:
+      postgres-vector:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    networks:
+      - techo360-net
+    mem_limit: 512m
+    cpus: 0.3
+    # Sin puertos publicos: el frontend no la llama directo, solo via
+    # RabbitMQ (a traves del chatbot), segun la arquitectura definida.
+
+  # ---------------------------------------------------------------
+  # Frontend (React) — sirve su propio contenido en el puerto 80
+  # ---------------------------------------------------------------
   frontend:
     build:
       context: ../techo360-frontend
@@ -91,9 +256,10 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+      - chatbot
     ports:
       - "80:80"
     networks:
       - techo360-net
     mem_limit: 128m
-    cpus: 0.25
+    cpus: 0.15

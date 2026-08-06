@@ -3,15 +3,11 @@
 # Techo 360 - Despliegue de UN SOLO servicio
 # ------------------------------------------------------------
 # Este es el corazon del aislamiento de fallos: reconstruye y
-# reinicia SOLO el servicio indicado (backend, ai-service o
-# frontend), sin tocar los demas contenedores. Si algo sale mal,
+# reinicia SOLO el servicio indicado (backend, chatbot, proyeccion
+# o frontend), sin tocar los demas contenedores. Si algo sale mal,
 # solo ese servicio se ve afectado.
 #
-# Lo llama el GitHub Actions de cada repo de servicio, pasando
-# su propio nombre. Ejemplo, desde el repo techo360-backend:
-#   ./deploy-service.sh backend
-#
-# Uso manual:
+# Uso: ./deploy-service.sh <backend|chatbot|proyeccion|frontend>
 #   chmod +x deploy-service.sh
 #   ./scripts/deploy-service.sh backend
 # ============================================================
@@ -19,7 +15,7 @@
 set -euo pipefail
 
 if [ -z "${1:-}" ]; then
-  echo "Uso: ./deploy-service.sh <backend|ai-service|frontend>"
+  echo "Uso: ./deploy-service.sh <backend|chatbot|proyeccion|frontend>"
   exit 1
 fi
 
@@ -33,10 +29,11 @@ LOG_FILE="$LOG_DIR/deploy_${SERVICE}_$(date +%Y%m%d_%H%M%S).log"
 # Mapeo de nombre de servicio -> carpeta del repo correspondiente
 case "$SERVICE" in
   backend)     REPO_DIR="$PROJECT_DIR/techo360-backend" ;;
-  ai-service)  REPO_DIR="$PROJECT_DIR/techo360-ai-service" ;;
+  chatbot)     REPO_DIR="$PROJECT_DIR/techo360-chatbot" ;;
+  proyeccion)  REPO_DIR="$PROJECT_DIR/techo360-proyeccion" ;;
   frontend)    REPO_DIR="$PROJECT_DIR/techo360-frontend" ;;
   *)
-    echo "Servicio desconocido: $SERVICE (usa backend, ai-service o frontend)"
+    echo "Servicio desconocido: $SERVICE (usa backend, chatbot, proyeccion o frontend)"
     exit 1
     ;;
 esac

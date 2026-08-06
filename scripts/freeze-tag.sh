@@ -28,7 +28,7 @@ if [ -z "${1:-}" ]; then
 fi
 
 TAG_NAME="$1"
-SERVICES=("backend" "ai-service" "frontend")
+SERVICES=("backend" "chatbot" "proyeccion" "frontend")
 
 echo "=== Congelando version actual como: $TAG_NAME ==="
 

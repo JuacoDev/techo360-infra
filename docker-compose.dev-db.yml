@@ -1,9 +1,14 @@
 # ============================================================
 # Techo 360 - Postgres de DESARROLLO/pruebas
 # ------------------------------------------------------------
-# Este archivo levanta un segundo Postgres aislado, separado
-# del de produccion, para que Base de Datos pruebe cambios de
-# esquema antes de integrarlos al Postgres real.
+# Este archivo levanta un segundo Postgres aislado, separado de
+# produccion, para probar cambios de esquema antes de integrarlos
+# a cualquiera de las 3 bases reales (principal, vectorial o de
+# usuarios).
+#
+# Por defecto usa la imagen con PostGIS (la mas completa). Si vas
+# a probar cambios del esquema VECTORIAL en vez del principal,
+# cambia la imagen de abajo a "pgvector/pgvector:pg16".
 #
 # Uso:
 #   docker compose -f docker-compose.dev-db.yml up -d

@@ -17,7 +17,7 @@
 set -euo pipefail
 
 if [ -z "${1:-}" ]; then
-  echo "Uso: ./rollback-service.sh <backend|ai-service|frontend>"
+  echo "Uso: ./rollback-service.sh <backend|chatbot|proyeccion|frontend>"
   exit 1
 fi
 
@@ -28,10 +28,11 @@ COMPOSE_FILE="$INFRA_DIR/docker-compose.yml"
 
 case "$SERVICE" in
   backend)     REPO_DIR="$PROJECT_DIR/techo360-backend" ;;
-  ai-service)  REPO_DIR="$PROJECT_DIR/techo360-ai-service" ;;
+  chatbot)     REPO_DIR="$PROJECT_DIR/techo360-chatbot" ;;
+  proyeccion)  REPO_DIR="$PROJECT_DIR/techo360-proyeccion" ;;
   frontend)    REPO_DIR="$PROJECT_DIR/techo360-frontend" ;;
   *)
-    echo "Servicio desconocido: $SERVICE (usa backend, ai-service o frontend)"
+    echo "Servicio desconocido: $SERVICE (usa backend, chatbot, proyeccion o frontend)"
     exit 1
     ;;
 esac
