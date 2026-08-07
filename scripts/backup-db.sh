@@ -16,6 +16,10 @@
 
 set -euo pipefail
 
+LOCKFILE="/opt/techo360/backups/.backup.lock"
+exec 200>"$LOCKFILE"
+flock -w 60 200 || { echo "No se pudo obtener el lock de backup tras 60s, otro respaldo esta en curso"; exit 1; }
+
 BACKUP_DIR="/opt/techo360/backups"
 
 # Cargar variables de entorno (usuarios/contrasenas/nombres de las 3 BDs)
