@@ -76,7 +76,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    # No se expone puerto al host: solo accesible dentro de techo360-net
+    # Puerto publicado SOLO en la IP privada de Tailscale (100.116.197.118),
+    # nunca en 0.0.0.0 ni en la IP publica del servidor -- alcanzable
+    # unicamente dentro de la red superpuesta cifrada de Tailscale, para
+    # acceso remoto del DBA (pgAdmin/DBeaver). No cuenta contra el limite
+    # de puertos aprobados por el CCA porque no es trafico de la interfaz
+    # publica del servidor.
+    ports:
+      - "100.116.197.118:5432:5432"
 
   postgres-vector:
     image: pgvector/pgvector:pg16
@@ -98,6 +105,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Puerto publicado SOLO en la IP privada de Tailscale (100.116.197.118),
+    # nunca en 0.0.0.0 ni en la IP publica del servidor -- alcanzable
+    # unicamente dentro de la red superpuesta cifrada de Tailscale, para
+    # acceso remoto del DBA (pgAdmin/DBeaver). No cuenta contra el limite
+    # de puertos aprobados por el CCA porque no es trafico de la interfaz
+    # publica del servidor.
+    ports:
+      - "100.116.197.118:5433:5432"
 
   postgres-users:
     image: postgres:16-alpine
@@ -118,6 +133,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Puerto publicado SOLO en la IP privada de Tailscale (100.116.197.118),
+    # nunca en 0.0.0.0 ni en la IP publica del servidor -- alcanzable
+    # unicamente dentro de la red superpuesta cifrada de Tailscale, para
+    # acceso remoto del DBA (pgAdmin/DBeaver). No cuenta contra el limite
+    # de puertos aprobados por el CCA porque no es trafico de la interfaz
+    # publica del servidor.
+    ports:
+      - "100.116.197.118:5434:5432"
 
   # ---------------------------------------------------------------
   # Cache / colas

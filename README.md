@@ -50,8 +50,9 @@ afectarlos a todos.
 22 (ssh-sftp), 80 (http), 443 (https), 5432 (postgresql), ping/snmp.
 Por eso `backend` y `chatbot` NO exponen puerto propio — `frontend`
 (Nginx) hace de reverse proxy y enruta `/api/` y `/chatbot/` hacia
-ellos internamente. El puerto 5432 está disponible pero de momento
-ninguna base de datos lo usa (ver nota más abajo).
+ellos internamente. El 5432 público es un puerto aprobado, distinto del
+acceso a las 3 bases vía Tailscale descrito más abajo (ese es tráfico
+de la red superpuesta cifrada, no de la interfaz pública).
 
 | Contenedor | Rol | Puerto expuesto |
 |---|---|---|
@@ -59,19 +60,20 @@ ninguna base de datos lo usa (ver nota más abajo).
 | `backend` | Mapa de calor, autenticación, actualización de datos | — (interno, vía proxy del frontend) |
 | `chatbot` | LLM propio + RAG (pgvector) | — (interno, vía proxy del frontend) |
 | `proyeccion` | Modelo LightGBM (series de tiempo) | — (interno, solo vía RabbitMQ) |
-| `postgres-principal` | PostgreSQL + PostGIS | — (interno) |
-| `postgres-vector` | PostgreSQL + pgvector (compartida chatbot/proyeccion) | — (interno) |
-| `postgres-users` | PostgreSQL (usuarios, roles, logs) | — (interno) |
+| `postgres-principal` | PostgreSQL + PostGIS | Tailscale: `100.116.197.118:5432` |
+| `postgres-vector` | PostgreSQL + pgvector (compartida chatbot/proyeccion) | Tailscale: `100.116.197.118:5433` |
+| `postgres-users` | PostgreSQL (usuarios, roles, logs) | Tailscale: `100.116.197.118:5434` |
 | `redis` | Cache + OTP | — (interno) |
 | `rabbitmq` | Broker de colas | — (panel admin no expuesto por defecto) |
 | `ollama` | LLM local (CPU-only, sin GPU en este VPS) | — (interno) |
 
-**Nota sobre el puerto 5432:** el CCA lo aprobó para que alguna base de
-datos pueda administrarse remotamente (pgAdmin/DBeaver) sin pasar por
-Tailscale. De momento ninguna de las 3 bases lo usa — decidir cuál (si
-alguna) conviene exponer así, considerando que Postgres expuesto
-directo a internet es un blanco de fuerza bruta si no se refuerza bien
-la contraseña.
+**Nota sobre el acceso a las 3 bases de datos vía Tailscale:** cada una
+publica su puerto únicamente en la IP privada de Tailscale
+(`100.116.197.118`), nunca en `0.0.0.0` ni en la IP pública del
+servidor. Es el patrón para acceso remoto del DBA/desarrollo
+(pgAdmin/DBeaver) sin exponer Postgres a internet — al ser tráfico
+dentro de la red superpuesta cifrada de Tailscale, no cuenta contra el
+límite de puertos aprobados por el CCA.
 
 ## Scripts
 
