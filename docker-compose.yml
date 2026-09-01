@@ -289,6 +289,14 @@ services:
   frontend:
     build:
       context: ../techo360-frontend
+      # VITE_API_URL="" es A PROPOSITO -- ruta relativa, NO un valor
+      # faltante. No completar con una URL: Vite la hornea en el build,
+      # y el valor vacio es lo que permite que las peticiones pasen por
+      # el proxy interno de nginx (location /api/ y /auth/, ver
+      # nginx.conf en techo360-frontend). Arreglado y verificado en vivo
+      # en produccion el 01-sep-2026 (antes quedaba "undefined").
+      args:
+        VITE_API_URL: ""
     image: techo360/frontend:${TAG:-dev}
     container_name: techo360-frontend
     restart: unless-stopped
