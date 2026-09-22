@@ -266,9 +266,17 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      # DATABASE_URL (principal, no vectorial): el consumer de RabbitMQ
+      # de este servicio consulta mapcalordb/zonas_municipio para
+      # construir el contexto de la proyeccion -- esos datos viven en
+      # postgres-principal, no en postgres-vector. Sin esta variable el
+      # consumer revienta con RuntimeError al primer mensaje.
+      DATABASE_URL: postgresql://${DB_PRINCIPAL_USER}:${DB_PRINCIPAL_PASSWORD}@postgres-principal:5432/${DB_PRINCIPAL_NAME}
       DATABASE_VECTOR_URL: postgresql://${DB_VECTOR_USER}:${DB_VECTOR_PASSWORD}@postgres-vector:5432/${DB_VECTOR_NAME}
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
     depends_on:
+      postgres-principal:
+        condition: service_healthy
       postgres-vector:
         condition: service_healthy
       rabbitmq:
@@ -278,7 +286,7 @@ services:
     mem_limit: 512m
     cpus: 0.3
     # Sin puertos publicos: el frontend no la llama directo, solo via
-    # RabbitMQ (a traves del chatbot), segun la arquitectura definida.
+    # RabbitMQ (a traves del backend), segun la arquitectura definida.
 
   # ---------------------------------------------------------------
   # Frontend (React) — sirve la SPA y ademas hace de reverse proxy
