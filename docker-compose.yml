@@ -178,15 +178,16 @@ services:
     # levantar que un simple TCP listen.
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
+      # timeout: 5s no alcanzaba -- rabbitmq-diagnostics ping arranca su
+      # PROPIO nodo Erlang efimero para conectarse al principal, y con
+      # cpus: 0.2 eso solo (no el servicio en si) tardaba ~10s reales
+      # (medido con `time docker exec ... rabbitmq-diagnostics ping`
+      # contra el VPS, exit 0 pero fuera del timeout viejo -- Docker lo
+      # contaba como fallo igual). interval > timeout para que un
+      # chequeo lento no se pise con el siguiente.
+      interval: 20s
+      timeout: 15s
       retries: 10
-      # 30s no alcanzo en un arranque en frio real (verificado contra
-      # el VPS: rabbitmq-diagnostics ping funcionaba manualmente
-      # segundos despues de que Docker ya lo habia marcado unhealthy y
-      # tumbado el "depends_on" del backend) -- con mem_limit: 256m el
-      # boot de la VM de Erlang + plugin de management es mas lento que
-      # en un entorno sin limite de memoria.
       start_period: 60s
     # Panel de administracion (15672) NO se expone al host por defecto;
     # usar Tailscale + port-forward manual si se necesita entrar a verlo.
