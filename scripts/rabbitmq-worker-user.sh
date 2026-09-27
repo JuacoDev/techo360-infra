@@ -9,8 +9,14 @@
 #   - configure+read en chatbot_requests (declarar/consumir la cola)
 #   - configure+write en chatbot_eventos_persistencia (publicar el
 #     evento de persistencia, igual que ya hace el chatbot del VPS)
-#   - write en el exchange por defecto (regex vacio "") -- necesario
-#     para responder por RPC via reply_to (aio_pika publica ahi)
+#   - write en 'amq.default' -- ese es el nombre real que RabbitMQ usa
+#     para el chequeo de permisos del exchange por defecto (aunque en
+#     AMQP se declare/publique con nombre vacio ""). Sin este permiso
+#     el consumer recibe el mensaje, genera la respuesta con Ollama, y
+#     luego el broker rechaza publicarla de vuelta por reply_to:
+#     "ACCESS_REFUSED - write access to exchange 'amq.default' ...
+#     refused for user 'techo360-worker'" -- confirmado real al validar
+#     el primer worker (27-sep-2026).
 #
 # Idempotente: si el usuario ya existe, solo actualiza password y
 # permisos (util para rotar la contrasena sin recrear el usuario).
@@ -47,7 +53,7 @@ docker exec "$CONTAINER" rabbitmqctl set_user_tags "$WORKER_USER"
 echo "--- Aplicando permisos minimos en vhost / ---"
 docker exec "$CONTAINER" rabbitmqctl set_permissions -p / "$WORKER_USER" \
   "^(chatbot_requests|chatbot_eventos_persistencia)?$" \
-  "^(chatbot_requests|chatbot_eventos_persistencia)?$" \
+  "^(chatbot_requests|chatbot_eventos_persistencia|amq\.default)$" \
   "^chatbot_requests$"
 
 echo "--- Verificacion (permisos aplicados, sin exponer password) ---"
