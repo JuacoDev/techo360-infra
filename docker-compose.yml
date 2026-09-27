@@ -245,15 +245,21 @@ services:
     image: techo360/chatbot:${TAG:-dev}
     container_name: techo360-chatbot
     restart: unless-stopped
-    env_file: .env
+    # Rediseño T-97 (26-sep-2026): SIN env_file -- ese .env compartido
+    # tiene TODAS las credenciales del proyecto (DB_VECTOR_PASSWORD,
+    # DB_PRINCIPAL_PASSWORD, JWT_SECRET_KEY, etc.) y `env_file:` inyecta
+    # el archivo completo al contenedor sin filtrar, sin importar que
+    # variables se declaren abajo en `environment:` (hallazgo real:
+    # quitar solo DATABASE_VECTOR_URL de aqui NO alcanzaba, DB_VECTOR_USER/
+    # PASSWORD seguian llegando via env_file, verificado con
+    # `docker exec ... env` contra el VPS). Este servicio corre en
+    # maquinas de laboratorio con acceso fisico de estudiantes y no
+    # debe tener NINGUNA credencial de base de datos ni de otro
+    # servicio -- solo lo que se lista explicitamente abajo.
+    # ${RABBITMQ_USER}/${RABBITMQ_PASSWORD} se siguen resolviendo:
+    # docker compose lee .env para sustituir variables en este YAML
+    # independientemente de env_file (son dos mecanismos distintos).
     environment:
-      # Rediseño T-97 (26-sep-2026): se removio DATABASE_VECTOR_URL
-      # (y con ella DB_VECTOR_USER/DB_VECTOR_PASSWORD) -- este servicio
-      # corre en maquinas de laboratorio con acceso fisico de
-      # estudiantes y no debe tener ninguna credencial de base de
-      # datos. Publica a RabbitMQ ("chatbot_eventos_persistencia"); el
-      # backend es quien persiste (ver AVISO en
-      # techo360-chatbot/migrations/0001_conversaciones_mensajes.sql).
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       OLLAMA_URL: http://ollama:11434
     depends_on:
