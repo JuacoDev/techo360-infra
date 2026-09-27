@@ -168,6 +168,20 @@ services:
       - techo360-net
     mem_limit: 256m
     cpus: 0.2
+    # rabbitmq-diagnostics ping no necesita credenciales (chequea el nodo
+    # erlang, no una cuenta) -- confirmado real: sin este healthcheck, el
+    # backend (depends_on: rabbitmq condition: service_started) podia
+    # intentar conectar su consumer de persistencia (T-97) antes de que
+    # RabbitMQ aceptara conexiones AMQP, y se caia en el arranque
+    # (AMQPConnectionError, Connection refused, visto en produccion el
+    # 27-sep-2026). start_period generoso porque RabbitMQ tarda mas en
+    # levantar que un simple TCP listen.
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     # Panel de administracion (15672) NO se expone al host por defecto;
     # usar Tailscale + port-forward manual si se necesita entrar a verlo.
 
@@ -227,7 +241,7 @@ services:
       redis:
         condition: service_started
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
     networks:
       - techo360-net
     mem_limit: 512m
