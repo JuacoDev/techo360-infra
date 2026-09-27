@@ -32,7 +32,7 @@ if [ -z "${WORKER_RABBITMQ_PASSWORD:-}" ]; then
   exit 1
 fi
 
-if docker exec "$CONTAINER" rabbitmqctl list_users --formatter csv | tail -n +2 | cut -d, -f1 | grep -qx "$WORKER_USER"; then
+if docker exec "$CONTAINER" rabbitmqctl list_users --no-table-headers | awk '{print $1}' | grep -qx "$WORKER_USER"; then
   echo "--- Usuario '$WORKER_USER' ya existe: actualizando password ---"
   docker exec "$CONTAINER" rabbitmqctl change_password "$WORKER_USER" "$WORKER_RABBITMQ_PASSWORD"
 else
