@@ -152,6 +152,8 @@ services:
     networks:
       - techo360-net
     mem_limit: 128m
+    ports:
+      - "6379:6379"
     cpus: 0.15
     # Cache + OTP, sin necesidad de volumen persistente
 
