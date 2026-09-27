@@ -1,0 +1,15 @@
+name: Techo 360 - Diagnostico de consumers de RabbitMQ
+
+# Manual -- para verificar de forma real (no solo "container running")
+# quien esta consumiendo 'chatbot_requests' y con que prioridad, al
+# validar el pool de workers (techo360-workers). No expone passwords.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  diagnose:
+    runs-on: self-hosted
+    steps:
+      - name: Listar consumers y sus prioridades
+        run: |
+          docker exec techo360-rabbitmq rabbitmqctl list_consumers consumer_tag,queue_name,channel_pid,priority,active
