@@ -50,5 +50,16 @@ echo "--- 4. Verificando que todos los contenedores esten arriba ---"
 sleep 10
 docker compose -f "$COMPOSE_FILE" ps
 
+echo "--- 5. Usuario RabbitMQ del pool de workers (techo360-workers) ---"
+if [ -n "${WORKER_RABBITMQ_PASSWORD:-}" ]; then
+  chmod +x scripts/rabbitmq-worker-user.sh
+  ./scripts/rabbitmq-worker-user.sh
+else
+  echo "    WORKER_RABBITMQ_PASSWORD no esta seteado en este run, se omite (no es un error: solo hace falta la primera vez o para rotar password)."
+fi
+
+echo "--- 6. Diagnostico de consumers de chatbot_requests (quien esta consumiendo y con que prioridad) ---"
+docker exec techo360-rabbitmq rabbitmqctl list_consumers consumer_tag,queue_name,priority,active || true
+
 echo "=== Cambios de infraestructura aplicados: $(date) ==="
 echo "Revisa la salida de 'docker compose ps' arriba para confirmar que todo diga 'running'."
