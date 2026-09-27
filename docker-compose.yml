@@ -195,8 +195,19 @@ services:
       timeout: 15s
       retries: 10
       start_period: 60s
-    # Panel de administracion (15672) NO se expone al host por defecto;
-    # usar Tailscale + port-forward manual si se necesita entrar a verlo.
+    # T-103 (27-sep-2026, validacion del pool de workers de laboratorio,
+    # ver techo360-workers): puertos publicados SOLO en la IP privada de
+    # Tailscale (100.116.197.118), mismo patron ya usado por los 3
+    # Postgres -- no cuenta contra el limite de puertos aprobados por el
+    # CCA porque no es trafico de la interfaz publica del servidor.
+    # 5672 (AMQP): para que consumers remotos (workers de techo360-workers)
+    # se conecten al broker fuera de la red Docker del VPS.
+    # 15672 (management, HTTP): para administrar usuarios/permisos via la
+    # API de management desde una maquina de Tailscale, sin necesitar
+    # acceso SSH/docker exec al VPS.
+    ports:
+      - "100.116.197.118:5672:5672"
+      - "100.116.197.118:15672:15672"
 
   # ---------------------------------------------------------------
   # LLM local (Ollama) para el Chatbot
@@ -289,6 +300,13 @@ services:
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       OLLAMA_URL: http://ollama:11434
+      # Consumer priority (RabbitMQ nativo, x-priority) -- este contenedor
+      # del VPS es el respaldo cuando ningun worker de techo360-workers
+      # esta conectado. Explicito aqui (aunque coincide con el default de
+      # app/rabbitmq_consumer.py) para que quede documentado junto a los
+      # demas valores de despliegue, ver techo360-workers/README.md para
+      # la prioridad alta que usan los workers de laboratorio.
+      CHATBOT_CONSUMER_PRIORITY: "0"
     depends_on:
       rabbitmq:
         condition: service_started
