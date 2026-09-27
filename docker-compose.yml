@@ -247,12 +247,16 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_VECTOR_URL: postgresql://${DB_VECTOR_USER}:${DB_VECTOR_PASSWORD}@postgres-vector:5432/${DB_VECTOR_NAME}
+      # Rediseño T-97 (26-sep-2026): se removio DATABASE_VECTOR_URL
+      # (y con ella DB_VECTOR_USER/DB_VECTOR_PASSWORD) -- este servicio
+      # corre en maquinas de laboratorio con acceso fisico de
+      # estudiantes y no debe tener ninguna credencial de base de
+      # datos. Publica a RabbitMQ ("chatbot_eventos_persistencia"); el
+      # backend es quien persiste (ver AVISO en
+      # techo360-chatbot/migrations/0001_conversaciones_mensajes.sql).
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       OLLAMA_URL: http://ollama:11434
     depends_on:
-      postgres-vector:
-        condition: service_healthy
       rabbitmq:
         condition: service_started
       ollama:
