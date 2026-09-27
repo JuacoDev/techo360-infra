@@ -177,14 +177,20 @@ services:
     # 27-sep-2026). start_period generoso porque RabbitMQ tarda mas en
     # levantar que un simple TCP listen.
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      # timeout: 5s no alcanzaba -- rabbitmq-diagnostics ping arranca su
-      # PROPIO nodo Erlang efimero para conectarse al principal, y con
-      # cpus: 0.2 eso solo (no el servicio en si) tardaba ~10s reales
-      # (medido con `time docker exec ... rabbitmq-diagnostics ping`
-      # contra el VPS, exit 0 pero fuera del timeout viejo -- Docker lo
-      # contaba como fallo igual). interval > timeout para que un
-      # chequeo lento no se pise con el siguiente.
+      # check_port_connectivity, NO ping -- ping solo confirma que el
+      # proceso Erlang esta registrado con epmd (asi lo dice el propio
+      # comando: "this only checks if the OS process is running and
+      # registered with epmd"), no que el listener AMQP (5672) ya
+      # acepte conexiones. Con ping, el backend arrancaba "sano" segun
+      # depends_on pero seguia recibiendo Connection refused en 5672
+      # (confirmado real contra el VPS: rabbitmq "Healthy" y el backend
+      # cayendo igual). check_port_connectivity prueba los 4 puertos
+      # activos (5672 entre ellos) de verdad.
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      # timeout: 5s no alcanzaba tampoco aqui -- ~7s reales medidos con
+      # `time docker exec ... check_port_connectivity` contra el VPS
+      # (mismo motivo que con ping: cpus: 0.2 hace lento el nodo Erlang
+      # efimero del propio comando de diagnostico, no el servicio).
       interval: 20s
       timeout: 15s
       retries: 10
