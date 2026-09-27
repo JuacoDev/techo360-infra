@@ -1,0 +1,21 @@
+name: Techo 360 - Diagnostico de consumers de RabbitMQ
+
+# Deliberadamente separado de deploy-infra.yml: ese pipeline hace backup
+# + reinicio de todos los servicios en cada corrida, demasiado pesado
+# solo para ver quien esta consumiendo 'chatbot_requests'. Este workflow
+# solo se dispara si cambia .trigger-diagnose (archivo vacio, se "toca"
+# con un timestamp para forzar un push liviano cuando se necesite un
+# diagnostico fresco al validar techo360-workers). No expone passwords.
+on:
+  push:
+    branches: [development]
+    paths:
+      - ".trigger-diagnose"
+
+jobs:
+  diagnose:
+    runs-on: self-hosted
+    steps:
+      - name: Listar consumers reales de chatbot_requests (tag, cola, activo, x-priority)
+        run: |
+          docker exec techo360-rabbitmq rabbitmqctl list_consumers consumer_tag queue_name active arguments
