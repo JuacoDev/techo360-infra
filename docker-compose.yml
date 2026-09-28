@@ -339,13 +339,27 @@ services:
       DATABASE_URL: postgresql://${DB_PRINCIPAL_USER}:${DB_PRINCIPAL_PASSWORD}@postgres-principal:5432/${DB_PRINCIPAL_NAME}
       DATABASE_VECTOR_URL: postgresql://${DB_VECTOR_USER}:${DB_VECTOR_PASSWORD}@postgres-vector:5432/${DB_VECTOR_NAME}
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+    # >>> AVISO -- mismo bug de rabbitmq: condition ya documentado y
+    # arreglado en backend (28-sep-2026), nunca se replico aca <<<
+    # Con `service_started`, este servicio arranca en cuanto el PROCESO
+    # de rabbitmq inicia, no cuando el puerto AMQP (5672) ya acepta
+    # conexiones -- el aviso original (mas arriba, en el healthcheck de
+    # rabbitmq) documenta el mismo sintoma en backend: AMQPConnectionError
+    # en el arranque. Confirmado real contra el VPS el 28-sep-2026:
+    # techo360-proyeccion con RestartCount=7 y `connect_robust()` agotando
+    # su ventana de reintentos antes de que rabbitmq (healthcheck
+    # start_period: 60s) estuviera listo -- "Application startup failed.
+    # Exiting.", Docker lo reinicia (restart: unless-stopped), y vuelve a
+    # correr la misma carrera. `service_healthy` (como ya tiene backend)
+    # hace que Compose espere el healthcheck real de rabbitmq antes de
+    # levantar este contenedor.
     depends_on:
       postgres-principal:
         condition: service_healthy
       postgres-vector:
         condition: service_healthy
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
     networks:
       - techo360-net
     mem_limit: 512m
