@@ -152,8 +152,14 @@ services:
     networks:
       - techo360-net
     mem_limit: 128m
+    # Puerto publicado SOLO en la IP privada de Tailscale (100.116.197.118),
+    # nunca en 0.0.0.0 ni en la IP publica del servidor -- mismo patron ya
+    # usado por los 3 Postgres y RabbitMQ. Redis NO tiene contraseña
+    # (requirepass), asi que "6379:6379" lo dejaba abierto a internet.
+    # El backend sigue usando redis://redis:6379/0 por la red interna de
+    # Docker; este puerto es solo para acceso remoto de depuracion.
     ports:
-      - "6379:6379"
+      - "100.116.197.118:6379:6379"
     cpus: 0.15
     # Cache + OTP, sin necesidad de volumen persistente
 
