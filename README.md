@@ -142,6 +142,40 @@ docker compose -f docker-compose.dev-db.yml down   # apagarlo cuando no se neces
 
 Resumen de las pruebas y cambios operativos del 5-oct-2026 en producción (VPS). Marcas: **COMPROBADO** = medido o verificado con comandos; **HIPÓTESIS** = inferido; **no verificado** = no se pudo comprobar. Borrador de origen: `techo360-pendientes/PRUEBAS_OPERATIVAS_2026-10-05.md` (fuera de los repos).
 
+### R1: borrado de conversaciones de `usuario_id = 2`
+- 11 conversaciones y 42 mensajes de `usuario_id = 2` borrados (2026-10-05, 16:12:05 UTC), con respaldo, copia en el PC, prueba de restauración local (15 de 15) y reversa. Quedaron las 5 conversaciones y 10 mensajes de `usuario_id = 0`; las secuencias no se tocaron (25 y 69).
+- Respaldo fuera de la rotación: `/opt/techo360/backups/reset_conversaciones_20261005_160349/`.
+  - `db_vector_completo.sql.gz`: 7484 B, sha256 `1876c8945cb39263cbcad19b62629d3f0d47d572bc6ccbab2ca9b6f3b542c0af`.
+  - `conversaciones_mensajes_datos_COPY.sql.gz`: 6524 B, sha256 `466337fd4c61da8e6fb900d70399ef8a3b426e1cfc67771cd719f11a23feb0bb`.
+  - Copia en el PC de trabajo (`respaldos-vps`) con tamaño y sha256 verificados antes del borrado.
+- Prueba de restauración local: PostgreSQL 16.4 desechable (127.0.0.1:55436). Restaurar el dump completo (16 conversaciones y 52 mensajes), ejecutar la transacción exacta del borrado (quedan 5 y 10), restaurar solo las dos tablas desde el dump COPY (16 y 52, md5 idéntico) y comprobar que la guardia aborta si hay un mensaje en `procesando`: 15 comprobaciones, 0 fallos.
+- Reversa: la misma secuencia del R3 (más abajo), apuntando a la carpeta de este respaldo.
+
+### Error real de Ollama (R2d)
+Inyección de fallo con un vigilante en el VPS (sesión de BD en solo lectura). Horas del vigilante, UTC, tal como las registró:
+- 20:01:18.890: vigilante armado (ventana de 60 min, `id > 69`).
+- 20:05:12.994: fila 70 en `procesando`, única en vuelo. Espera de 5 s.
+- 20:05:18.491: temporizador de seguridad armado (`docker start` a los 45 s).
+- 20:05:18.494: `docker stop techo360-ollama`. 20:05:18.870: Ollama detenido.
+- 20:05:39.162: `docker start` (sin recrear). 20:05:39.700: `cpus=3000000000` y `/api/tags` en 200 con los 2 modelos.
+- 20:05:39.903: el vigilante registra el mensaje 70 en `error` con `intentos = 1`. Es la hora en que retomó el sondeo, porque estaba bloqueado en la parada y la espera de 20 s; el cambio real fue hacia las 20:05:18,6 (aviso del chatbot a las 20:05:18.534 y 503 del backend a las 20:05:18.579).
+- 20:06:17.602: tras pulsar Reintentar, el mensaje 70 pasa a `procesando` con `intentos = 2`.
+- 20:07:04.093: el vigilante registra el mensaje 70 en `respondido` con `intentos = 2`, y la respuesta del asistente (id 71). En la base, `actualizado_en` es 20:07:03.435. Reintentar tardó ~46 s.
+
+Qué ocurrió (COMPROBADO con los logs): Ollama se detuvo **durante la carga del modelo** (su log registra `Load failed` a las 20:05:18.584). El chatbot registró `Server disconnected without sending a response` y el backend devolvió **503** al usuario. El mensaje no se perdió: quedó en `error` y Reintentar lo llevó a `respondido` (~46 s, con carga en frío del modelo).
+
+El caso de una respuesta tardía del primer intento no quedó probado: la parada cortó el primer intento durante la carga, así que no llegó ninguna respuesta tardía.
+
+### D10 y D11: ventana sin consumer en `chatbot_requests`
+- Al recrear el chatbot, la ventana sin consumer fue de ~3,1 s en ambos despliegues: 3,13 s en D10 y 3,11 s en D11, medida desde la muerte (`die`) del contenedor viejo hasta el registro del consumer nuevo (eventos de Docker y log del chatbot).
+- Aviso: el reencolado de un mensaje en vuelo no se probó; en ninguno de los dos despliegues había mensajes en curso.
+
+### Estrés, niveles 1 y 2
+- Nivel 1, 1 mensaje: 43,6 s (la base da 43,7 s entre el mensaje de usuario y la respuesta; 195 tokens a ~4,6 tokens/s).
+- Nivel 2, 2 mensajes simultáneos (de la base): 39,3 s y 80,2 s. El segundo esperó ~39 s al primero y tardó ~41 s propios.
+- Se atiende en serie: el consumer del chatbot usa `prefetch 1` y la cola mostró 2 mensajes con 1 sin ack.
+- Los niveles 3 y 4 están en la sección siguiente.
+
 ### Latencias de estrés (confirmadas por la base; todas anteriores a D11)
 - 3 envíos simultáneos: 46,3 s, 81,0 s y 119,7 s.
 - 4 envíos simultáneos: 46,9 s, 94,3 s, 147,5 s y 183,8 s.
