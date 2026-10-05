@@ -15,6 +15,7 @@
 # ============================================================
 
 set -euo pipefail
+umask 077
 
 LOCKFILE="/opt/techo360/backups/.backup.lock"
 exec 200>"$LOCKFILE"
