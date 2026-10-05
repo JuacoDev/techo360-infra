@@ -30,13 +30,13 @@ Repos hermanos bajo esta misma carpeta (`techo360/`):
 
 Hay dos vías, y ninguna sustituye a la autorización del usuario para escribir:
 
-1. **Conexión directa a Postgres** vía `DATABASE_URL` en `techo360-backend/.env`, que apunta a una IP de **Tailscale** (`100.116.197.118:5432`), nunca `0.0.0.0` — así el DBA puede usar pgAdmin/DBeaver sin gastar el presupuesto de puertos públicos aprobados por el comité de infraestructura de la universidad (ver más abajo). Para consultar la BD real desde un script Python: leer `DATABASE_URL` de ese `.env` con `psycopg2.connect(...)`, exactamente como ya hacen `ingestion/proyeccion_2024.py` y los scripts de una sola corrida en `ingestion/`.
+1. **Conexión directa a Postgres** vía `DATABASE_URL` en `<ruta_del_env>`, que apunta a una IP de **Tailscale** (`100.116.197.118:5432`), nunca `0.0.0.0` — así el DBA puede usar pgAdmin/DBeaver sin gastar el presupuesto de puertos públicos aprobados por el comité de infraestructura de la universidad (ver más abajo). Para consultar la BD real desde un script Python: leer `DATABASE_URL` de ese archivo con `psycopg2.connect(...)`, exactamente como ya hacen `ingestion/proyeccion_2024.py` y los scripts de una sola corrida en `ingestion/`.
 2. **SSH al VPS** (puerto 22, ya aprobado por el CCA): desde el 4-oct es la vía de trabajo habitual en cada fase que el usuario autoriza (consultas de solo lectura con `docker exec`, respaldos, despliegues, mediciones). Nació el 24-sep-2026 como respaldo cuando Tailscale cayó (timeout total en el TCP connect hacia `100.116.197.118:5432`, aunque `tailscale ping` respondía vía DERP).
-   - Host: IP pública del VPS (`207.248.81.115`); usuario `techo360-admin` (confirmado por el usuario, no asumido), con una llave ya instalada en el PC de trabajo (no se documenta su ruta).
+   - Host: `<IP_VPS>` (IP pública del VPS); usuario `<usuario_ssh>` (confirmado por el usuario, no asumido), con una llave ya instalada en el PC de trabajo (no se documenta su ruta).
    - El usuario pertenece a los grupos `docker`, `adm` y `sudo`, pero `sudo` pide contraseña: `ufw`, `iptables` y `journalctl` con `sudo` no son accesibles; `journalctl` sin `sudo` sí lo es (grupo `adm`).
    - Solo con autorización explícita del usuario para cada fase; si una conexión falla, informar y esperar (no probar otra ruta). El 5-oct hubo dos cortes de acceso desde el PC de trabajo (~19:56 y ~21:15 UTC), resueltos cambiando de red; causa desconocida.
 
-**No pegar contraseñas/URLs de conexión en el chat** — señalar la ruta del `.env` en vez de citar el valor, aunque el usuario sea el dueño del archivo.
+**No pegar contraseñas/URLs de conexión en el chat** — señalar la ruta (`<ruta_del_env>`) en vez de citar el valor, aunque el usuario sea el dueño del archivo.
 
 ## Restricciones reales de infraestructura (no asumir que no aplican)
 
@@ -144,7 +144,7 @@ que seguirlo, no improvisar uno nuevo:
   borran después de confirmar, no se dejan commiteados salvo que el usuario pida una
   suite real).
 - El frontend local (`npm run dev`, puerto 5173) apunta por defecto a la **API de
-  producción real** (`.env` con `VITE_API_URL`), no a localhost — no hace falta levantar
+  producción real** (archivo de entorno con `VITE_API_URL`), no a localhost — no hace falta levantar
   el backend en local. La API requiere sesión (`Authorization: Bearer <token>`); sin
   credenciales de prueba, la forma establecida de verificar cambios de UI es
   **mockear las rutas de red con Playwright** (`page.route(...)`) usando datos que
@@ -209,6 +209,7 @@ Solo lo que un agente futuro necesita; el detalle por servicio está en el READM
 - `pg_dump` del VPS emite `\restrict`/`\unrestrict`: restaurar con el `psql` del propio contenedor (misma versión); un `psql` local 16.4 no los entiende.
 - Al validar patrones de contenido usar indicadores no ambiguos (la `N` de «Estres N» se interpretó como número).
 - Windows: los heredocs con apóstrofes fallan en la herramienta Bash (escribir los scripts con la herramienta de archivos); muchos archivos del repo están en CRLF (conservarlos al editar).
+- No abrir decenas de conexiones SSH seguidas: `sshd` cortó con `Connection reset by peer` en el intercambio de claves tras una ráfaga de 36 conexiones (HIPÓTESIS: límite de conexiones de `sshd`; no se comprobó). Usar una sola conexión (`tar` o `scp` en bloque) y espaciar las ráfagas.
 
 ### Capacidades medidas
 - 3 envíos simultáneos al chatbot: 46,3 / 81,0 / 119,7 s. 4 simultáneos: 46,9 / 94,3 / 147,5 / 183,8 s, con ~16 s de margen frente a los 200 s del backend (antes de D11). El quinto no se probó.
