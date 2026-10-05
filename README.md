@@ -138,4 +138,40 @@ docker compose -f docker-compose.dev-db.yml down   # apagarlo cuando no se neces
   de una entrega, para que el equipo pueda seguir haciendo push a `development`
   sin arriesgar la demo con cambios de último momento.
 
+## Pruebas operativas del 5-oct-2026
+
+Resumen de las pruebas y cambios operativos del 5-oct-2026 en producción (VPS). Marcas: **COMPROBADO** = medido o verificado con comandos; **HIPÓTESIS** = inferido; **no verificado** = no se pudo comprobar. Borrador de origen: `techo360-pendientes/PRUEBAS_OPERATIVAS_2026-10-05.md` (fuera de los repos).
+
+### Latencias de estrés (confirmadas por la base; todas anteriores a D11)
+- 3 envíos simultáneos: 46,3 s, 81,0 s y 119,7 s.
+- 4 envíos simultáneos: 46,9 s, 94,3 s, 147,5 s y 183,8 s.
+- Capacidad medida: 4 simultáneos con 16 s de margen frente al tope de 200 s del backend. El quinto no se probó.
+
+### Monitoreo del chatbot (60 min, solo lectura)
+- Memoria máxima de Ollama: 81,9 % de 3 GiB.
+- Throttling >50 % durante cada generación (la CPU de Ollama se satura contra su cuota de 3 CPU). En la medición directa de D11 bajó de 78 % a 5 %.
+- Cola `chatbot_requests`: máximo de 4 mensajes.
+- 0 OOM y 0 reinicios **de Ollama**. El chatbot y el frontend sí se recrearon por D11 y D12.
+- Las únicas 2 muestras de `/health` fuera de 200 coinciden con esos recreados (chatbot 502 en D11 y 000 en D12; el `/health` del chatbot pasa por el nginx del frontend).
+
+### D11 (`num_thread = 3` en el chatbot)
+- 5,32 → 7,18 tokens/s, medición directa a Ollama con un prompt corto (62–66 tokens). El efecto con respuestas reales por la app no está verificado.
+
+### D12 (timeouts de 210 s en `/chatbot/mensajes`)
+- El frontend estuvo inaccesible ~0,8–0,9 s durante el recreado, medido desde dentro del VPS.
+
+### Incidencias de red
+- Dos cortes de acceso al VPS desde el PC de trabajo (~19:56 y ~21:15 UTC), ambos resueltos cambiando de red.
+- `fail2ban` inactivo. El journal de sshd solo se revisó para el segundo corte (~20:55–21:30 UTC) y no muestra intentos fallidos ni bloqueos; para el primero no se revisó.
+- `ufw` e `iptables` no se pudieron revisar sin `sudo`. Causa de los cortes: desconocida.
+
+### No verificado
+- Nivel 5: el quinto envío simultáneo no se probó.
+- Reintentar con la cola ocupada y el posible 504 de nginx (D12 sube el timeout, pero el caso no se reprodujo).
+- El efecto de D11 medido por la app con respuestas reales.
+- El reencolado de un mensaje en vuelo al recrear el chatbot (en D10 y D11 no había mensajes en curso).
+- Los proxies o firewalls fuera del VPS.
+- `ufw` e `iptables`.
+- La causa de los dos cortes de red.
+
 <!-- prueba CI/CD -->
