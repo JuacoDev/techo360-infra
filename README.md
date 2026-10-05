@@ -174,4 +174,22 @@ Resumen de las pruebas y cambios operativos del 5-oct-2026 en producción (VPS).
 - `ufw` e `iptables`.
 - La causa de los dos cortes de red.
 
+### R3: borrado de conversaciones de prueba
+- 11 conversaciones de prueba y 22 mensajes borrados (ids 26–36, `usuario_id = 2`), con respaldo, copia en el PC, reversa documentada y secuencias intactas (`conversaciones_id_seq` en 36 y `mensajes_id_seq` en 91).
+- Quedan las 5 conversaciones y 10 mensajes de `usuario_id = 0`.
+- Antes de borrar se comprobó, con consultas de solo lectura, que el conjunto `id > 25` eran exactamente esas 11 conversaciones, todas de `usuario_id = 2`, con mensajes que empiezan por «Prueba R2c» o «Estres N», y 0 mensajes en `pendiente`/`procesando`. La transacción repite esas comprobaciones y aborta si no coinciden.
+- Respaldo fuera de la rotación: `/opt/techo360/backups/reset_conversaciones_r3_20261005_213501/` (`db_vector_completo.sql.gz` y `conversaciones_mensajes_datos_COPY.sql.gz`, con `gzip -t` y `SHA256SUMS`). Copia en el PC de trabajo (`respaldos-vps`) con tamaño y sha256 verificados antes del borrado.
+- Lección: al validar patrones de contenido conviene un indicador no ambiguo. La `N` de «Estres N» se interpretó primero como un número y marcó 10 conversaciones como «sin patrón» por error.
+
+**Reversa** (solo las dos tablas, en una transacción; usa el `psql` del contenedor, de la misma versión que el `pg_dump`). En el VPS:
+
+```bash
+cd /opt/techo360/backups/reset_conversaciones_r3_20261005_213501
+set -a; source /opt/techo360/techo360-infra/.env; set +a    # no imprimir el contenido
+{ echo "BEGIN;"; echo "DELETE FROM conversaciones;"; zcat conversaciones_mensajes_datos_COPY.sql.gz; echo "COMMIT;"; } \
+  | docker exec -i techo360-postgres-vector psql -U "$DB_VECTOR_USER" -d "$DB_VECTOR_NAME" -v ON_ERROR_STOP=1
+```
+
+Devuelve las 16 conversaciones y 32 mensajes anteriores al borrado (`DELETE FROM conversaciones` cascada a `mensajes`) y deja las secuencias en 36 y 91. Antes de restaurar, avisar a quien use TechoBot. Esta secuencia (`BEGIN`, `DELETE`, dump de datos, `COMMIT`) se validó en una base PostgreSQL desechable en el R1 de ese mismo día; en R3 no se repitió esa prueba, y no se probó en el VPS con las órdenes `\restrict` y `\unrestrict` que emite el `pg_dump` actual.
+
 <!-- prueba CI/CD -->
