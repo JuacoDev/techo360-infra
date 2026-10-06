@@ -313,7 +313,7 @@ services:
       CHATBOT_CONSUMER_PRIORITY: "0"
     depends_on:
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       ollama:
         condition: service_started
     networks:

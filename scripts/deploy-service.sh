@@ -41,6 +41,19 @@ esac
 mkdir -p "$LOG_DIR"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
+# Candado compartido entre deploy-service.sh y deploy-infra.sh (T-127):
+# los workflows de cada repo corren en runners distintos y GitHub no
+# comparte `concurrency` entre repos, pero todos llaman a estos scripts en
+# el mismo VPS. Sin serializar, `up -d` (todo) de infra y `up -d --no-deps
+# <servicio>` de un servicio recreaban el mismo contenedor a la vez
+# ("container name already in use", 26-sep-2026). flock en un fd se libera
+# solo al terminar el proceso, incluso si el script falla.
+exec 9>"$LOG_DIR/.deploy.lock"
+if ! flock -w 1800 9; then
+  echo "!!! No se pudo obtener el candado de deploy tras 30 min, abortando."
+  exit 1
+fi
+
 echo "=== Desplegando servicio: $SERVICE ($(date)) ==="
 
 echo "--- 1. Respaldo de base de datos (por seguridad, aunque este servicio no la toque directo) ---"
