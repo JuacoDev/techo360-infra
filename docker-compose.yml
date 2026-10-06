@@ -158,6 +158,12 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: techo360-rabbitmq
+    # hostname FIJO (T-127): RabbitMQ nombra su base de datos con el hostname
+    # del contenedor (mnesia/rabbit@<hostname>). Sin esto el hostname es el
+    # container ID, y cada recreate arrancaba con una base vacia (usuarios,
+    # permisos y colas perdidos) dejando el directorio anterior huerfano en
+    # el volumen (7 huerfanos acumulados al 6-oct-2026).
+    hostname: techo360-rabbitmq
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
