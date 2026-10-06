@@ -176,8 +176,46 @@ services:
       - techo360-net
     mem_limit: 256m
     cpus: 0.2
-    # Panel de administracion (15672) NO se expone al host por defecto;
-    # usar Tailscale + port-forward manual si se necesita entrar a verlo.
+    # rabbitmq-diagnostics ping no necesita credenciales (chequea el nodo
+    # erlang, no una cuenta) -- confirmado real: sin este healthcheck, el
+    # backend (depends_on: rabbitmq condition: service_started) podia
+    # intentar conectar su consumer de persistencia (T-97) antes de que
+    # RabbitMQ aceptara conexiones AMQP, y se caia en el arranque
+    # (AMQPConnectionError, Connection refused, visto en produccion el
+    # 27-sep-2026). start_period generoso porque RabbitMQ tarda mas en
+    # levantar que un simple TCP listen.
+    healthcheck:
+      # check_port_connectivity, NO ping -- ping solo confirma que el
+      # proceso Erlang esta registrado con epmd (asi lo dice el propio
+      # comando: "this only checks if the OS process is running and
+      # registered with epmd"), no que el listener AMQP (5672) ya
+      # acepte conexiones. Con ping, el backend arrancaba "sano" segun
+      # depends_on pero seguia recibiendo Connection refused en 5672
+      # (confirmado real contra el VPS: rabbitmq "Healthy" y el backend
+      # cayendo igual). check_port_connectivity prueba los 4 puertos
+      # activos (5672 entre ellos) de verdad.
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      # timeout: 5s no alcanzaba tampoco aqui -- ~7s reales medidos con
+      # `time docker exec ... check_port_connectivity` contra el VPS
+      # (mismo motivo que con ping: cpus: 0.2 hace lento el nodo Erlang
+      # efimero del propio comando de diagnostico, no el servicio).
+      interval: 20s
+      timeout: 15s
+      retries: 10
+      start_period: 60s
+    # T-103 (27-sep-2026, validacion del pool de workers de laboratorio,
+    # ver techo360-workers): puertos publicados SOLO en la IP privada de
+    # Tailscale (100.116.197.118), mismo patron ya usado por los 3
+    # Postgres -- no cuenta contra el limite de puertos aprobados por el
+    # CCA porque no es trafico de la interfaz publica del servidor.
+    # 5672 (AMQP): para que consumers remotos (workers de techo360-workers)
+    # se conecten al broker fuera de la red Docker del VPS.
+    # 15672 (management, HTTP): para administrar usuarios/permisos via la
+    # API de management desde una maquina de Tailscale, sin necesitar
+    # acceso SSH/docker exec al VPS.
+    ports:
+      - "100.116.197.118:5672:5672"
+      - "100.116.197.118:15672:15672"
 
   # ---------------------------------------------------------------
   # LLM local (Ollama) para el Chatbot
@@ -216,6 +254,13 @@ services:
     environment:
       DATABASE_URL: postgresql://${DB_PRINCIPAL_USER}:${DB_PRINCIPAL_PASSWORD}@postgres-principal:5432/${DB_PRINCIPAL_NAME}
       DATABASE_USERS_URL: postgresql://${DB_USERS_USER}:${DB_USERS_PASSWORD}@postgres-users:5432/${DB_USERS_NAME}
+      # T-98/T-99/T-102 (conversaciones/mensajes del chatbot): decision
+      # del usuario (26-sep-2026) de que el backend maneje TODA la
+      # persistencia -- los servicios de IA (chatbot, proyeccion) solo
+      # procesan solicitudes, no son dueños de su propia escritura a BD.
+      # Antes SOLO chatbot tenia esta credencial (T-97) -- ver AVISO en
+      # techo360-backend/core/config.py.
+      DATABASE_VECTOR_URL: postgresql://${DB_VECTOR_USER}:${DB_VECTOR_PASSWORD}@postgres-vector:5432/${DB_VECTOR_NAME}
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
     depends_on:
@@ -223,10 +268,12 @@ services:
         condition: service_healthy
       postgres-users:
         condition: service_healthy
+      postgres-vector:
+        condition: service_healthy
       redis:
         condition: service_started
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
     networks:
       - techo360-net
     mem_limit: 512m
@@ -244,14 +291,31 @@ services:
     image: techo360/chatbot:${TAG:-dev}
     container_name: techo360-chatbot
     restart: unless-stopped
-    env_file: .env
+    # Rediseño T-97 (26-sep-2026): SIN env_file -- ese .env compartido
+    # tiene TODAS las credenciales del proyecto (DB_VECTOR_PASSWORD,
+    # DB_PRINCIPAL_PASSWORD, JWT_SECRET_KEY, etc.) y `env_file:` inyecta
+    # el archivo completo al contenedor sin filtrar, sin importar que
+    # variables se declaren abajo en `environment:` (hallazgo real:
+    # quitar solo DATABASE_VECTOR_URL de aqui NO alcanzaba, DB_VECTOR_USER/
+    # PASSWORD seguian llegando via env_file, verificado con
+    # `docker exec ... env` contra el VPS). Este servicio corre en
+    # maquinas de laboratorio con acceso fisico de estudiantes y no
+    # debe tener NINGUNA credencial de base de datos ni de otro
+    # servicio -- solo lo que se lista explicitamente abajo.
+    # ${RABBITMQ_USER}/${RABBITMQ_PASSWORD} se siguen resolviendo:
+    # docker compose lee .env para sustituir variables en este YAML
+    # independientemente de env_file (son dos mecanismos distintos).
     environment:
-      DATABASE_VECTOR_URL: postgresql://${DB_VECTOR_USER}:${DB_VECTOR_PASSWORD}@postgres-vector:5432/${DB_VECTOR_NAME}
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       OLLAMA_URL: http://ollama:11434
+      # Consumer priority (RabbitMQ nativo, x-priority) -- este contenedor
+      # del VPS es el respaldo cuando ningun worker de techo360-workers
+      # esta conectado. Explicito aqui (aunque coincide con el default de
+      # app/rabbitmq_consumer.py) para que quede documentado junto a los
+      # demas valores de despliegue, ver techo360-workers/README.md para
+      # la prioridad alta que usan los workers de laboratorio.
+      CHATBOT_CONSUMER_PRIORITY: "0"
     depends_on:
-      postgres-vector:
-        condition: service_healthy
       rabbitmq:
         condition: service_started
       ollama:
@@ -264,7 +328,8 @@ services:
     # internamente via el proxy del frontend (proxy_pass http://chatbot:8000/).
 
   # ---------------------------------------------------------------
-  # Servicio IA - Proyeccion: modelo LightGBM (series de tiempo)
+  # Servicio IA - Proyeccion: series de tiempo (ya no usa LightGBM,
+  # ver README de techo360-proyeccion)
   # ---------------------------------------------------------------
   proyeccion:
     build:
@@ -274,19 +339,41 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      # DATABASE_URL (principal, no vectorial): el consumer de RabbitMQ
+      # de este servicio consulta mapcalordb/zonas_municipio para
+      # construir el contexto de la proyeccion -- esos datos viven en
+      # postgres-principal, no en postgres-vector. Sin esta variable el
+      # consumer revienta con RuntimeError al primer mensaje.
+      DATABASE_URL: postgresql://${DB_PRINCIPAL_USER}:${DB_PRINCIPAL_PASSWORD}@postgres-principal:5432/${DB_PRINCIPAL_NAME}
       DATABASE_VECTOR_URL: postgresql://${DB_VECTOR_USER}:${DB_VECTOR_PASSWORD}@postgres-vector:5432/${DB_VECTOR_NAME}
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+    # >>> AVISO -- mismo bug de rabbitmq: condition ya documentado y
+    # arreglado en backend (28-sep-2026), nunca se replico aca <<<
+    # Con `service_started`, este servicio arranca en cuanto el PROCESO
+    # de rabbitmq inicia, no cuando el puerto AMQP (5672) ya acepta
+    # conexiones -- el aviso original (mas arriba, en el healthcheck de
+    # rabbitmq) documenta el mismo sintoma en backend: AMQPConnectionError
+    # en el arranque. Confirmado real contra el VPS el 28-sep-2026:
+    # techo360-proyeccion con RestartCount=7 y `connect_robust()` agotando
+    # su ventana de reintentos antes de que rabbitmq (healthcheck
+    # start_period: 60s) estuviera listo -- "Application startup failed.
+    # Exiting.", Docker lo reinicia (restart: unless-stopped), y vuelve a
+    # correr la misma carrera. `service_healthy` (como ya tiene backend)
+    # hace que Compose espere el healthcheck real de rabbitmq antes de
+    # levantar este contenedor.
     depends_on:
+      postgres-principal:
+        condition: service_healthy
       postgres-vector:
         condition: service_healthy
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
     networks:
       - techo360-net
     mem_limit: 512m
     cpus: 0.3
     # Sin puertos publicos: el frontend no la llama directo, solo via
-    # RabbitMQ (a traves del chatbot), segun la arquitectura definida.
+    # RabbitMQ (a traves del backend), segun la arquitectura definida.
 
   # ---------------------------------------------------------------
   # Frontend (React) — sirve la SPA y ademas hace de reverse proxy

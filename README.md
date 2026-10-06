@@ -59,7 +59,7 @@ de la red superpuesta cifrada, no de la interfaz pública).
 | `frontend` | React + Nginx (sirve la SPA y hace de reverse proxy hacia backend/chatbot) | 80 (443 cuando haya DNS/TLS) |
 | `backend` | Mapa de calor, autenticación, actualización de datos | — (interno, vía proxy del frontend) |
 | `chatbot` | LLM propio + RAG (pgvector) | — (interno, vía proxy del frontend) |
-| `proyeccion` | Modelo LightGBM (series de tiempo) | — (interno, solo vía RabbitMQ) |
+| `proyeccion` | Proyección de series de tiempo (sin LightGBM desde 23-sep-2026) | — (interno, solo vía RabbitMQ) |
 | `postgres-principal` | PostgreSQL + PostGIS | Tailscale: `100.116.197.118:5432` |
 | `postgres-vector` | PostgreSQL + pgvector (compartida chatbot/proyeccion) | Tailscale: `100.116.197.118:5433` |
 | `postgres-users` | PostgreSQL (usuarios, roles, logs) | Tailscale: `100.116.197.118:5434` |

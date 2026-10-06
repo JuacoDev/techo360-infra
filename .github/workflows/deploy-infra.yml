@@ -5,6 +5,17 @@ name: Deploy Techo 360 - Infraestructura
 on:
   push:
     branches: [development]
+    # .trigger-diagnose es solo para diagnose-rabbitmq.yml (workflow
+    # liviano) -- sin este paths-ignore, cada diagnostico de consumers
+    # tambien dispara este pipeline pesado (backup + restart de todos
+    # los servicios), como paso el 27-sep-2026 (run 36340642219).
+    paths-ignore:
+      - ".trigger-diagnose"
+  # Permite re-correr manualmente sin necesitar un push nuevo (util para
+  # el diagnostico de consumers al validar techo360-workers) -- solo
+  # queda disponible desde la UI/API una vez este workflow llegue a la
+  # rama por defecto (main), ver sincronizacion de sprint habitual.
+  workflow_dispatch: {}
 
 jobs:
   deploy-infra:
@@ -14,6 +25,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Aplicar cambios de infraestructura
+        env:
+          WORKER_RABBITMQ_PASSWORD: ${{ secrets.WORKER_RABBITMQ_PASSWORD }}
         run: |
           chmod +x scripts/deploy-infra.sh
           ./scripts/deploy-infra.sh

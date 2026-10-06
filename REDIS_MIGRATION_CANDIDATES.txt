@@ -1,0 +1,33 @@
+Candidatos a migrar a Redis (registrado 25-sep-2026)
+=====================================================
+
+Contexto: Redis ya esta disponible en la infraestructura del proyecto
+(ver docker-compose.yml, servicio "redis"). Los siguientes lugares
+implementan cacheo ad-hoc de descargas pesadas SOLO en memoria de
+proceso (atributos de instancia) o, en un caso, un parche puntual de
+disco -- ninguno sobrevive entre procesos/subprocesos ni esta pensado
+para compartirse entre workers. Deberian migrar a Redis como tarea
+propia, no como mejora incremental al mecanismo actual de cada uno.
+
+1. techo360-backend/ingestion/dane_poblacion_adapter.py
+   - Cache en DISCO (parche puntual, 25-sep-2026, ver bloque >>> AVISO
+     <<< junto a CACHE_XLSX_PATH en el archivo) -- XLSX de poblacion
+     DANE, 131.6 MB, ~53s de descarga. Se agrego porque el watchdog de
+     reintentos (ingestion/cargar_dane_con_reintentos.py) lanza un
+     subproceso nuevo por intento y el cache en memoria no sobrevivia
+     entre subprocesos, causando cuelgues falso-positivos por exceder
+     el timeout de liveness del watchdog.
+
+2. techo360-backend/ingestion/dane_deficit_adapter.py
+   - Cache SOLO en memoria (self._cache_bytes), mismo patron que (1)
+     antes del parche. XLSX de deficit habitacional DANE. No se toco
+     en este esfuerzo (no forma parte de la carga 2025-2042 en curso)
+     pero tiene la misma limitacion estructural.
+
+3. techo360-backend/ingestion/terridata_adapter.py
+   - Cache SOLO en memoria (self._cache_zip_bytes, dict por codigo de
+     dimension). ZIPs descargados de TerriData. Misma limitacion.
+
+Nota: grep completo en los 5 repos del monorepo (backend, proyeccion,
+chatbot, frontend, infra) el 25-sep-2026 no encontro otros patrones de
+cache ad-hoc (ni en memoria ni en disco) fuera de estos 3 archivos.
