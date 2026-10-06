@@ -86,6 +86,16 @@ límite de puertos aprobados por el CCA.
 | `scripts/backup-db.sh` | Automático antes de cada deploy; respalda las 3 bases de datos, conserva las últimas 2 copias de cada una |
 | `scripts/freeze-tag.sh <nombre>` | Antes de una entrega/demo, para congelar una versión estable de los 4 servicios |
 
+## Serialización de deploys y orden de arranque (T-127)
+
+**Carrera entre runners.** El VPS tiene un runner self-hosted por repo (`actions-runner-infra`, `-frontend`, `-backend`, `-chatbot`, `-proyeccion`), todos con el usuario `techo360-admin`. `deploy-infra.sh` ejecuta `docker compose up -d` sobre todos los servicios y `deploy-service.sh` ejecuta `up -d --no-deps <servicio>`; si dos pushes coinciden, ambos recrean el mismo contenedor a la vez y falla con "container name already in use" (26-sep-2026, 3 runs). El `concurrency` de GitHub Actions no sirve aquí porque sus grupos no se comparten entre repos.
+
+**Mitigación.** `deploy-infra.sh` y `deploy-service.sh` toman un `flock` exclusivo sobre `/opt/techo360/logs/.deploy.lock` (espera máxima 1800 s; si expira o falla, abortan con `exit 1` y no continúan sin candado). Es cross-repo porque todos los workflows llaman a estos scripts. Ningún workflow define `timeout-minutes` (el default de GitHub es 360 min, mayor que los 30 min del candado). `rollback-service.sh` no toma candado: lo invoca `deploy-service.sh`, que ya lo tiene; un rollback manual no está serializado.
+
+**Alcance de `service_healthy`.** `backend`, `proyeccion` y `chatbot` esperan a RabbitMQ con `condition: service_healthy`. `deploy-service.sh` usa `--no-deps`, que no evalúa `depends_on`: la espera solo aplica a `deploy-infra.sh` (`up -d` completo) y a un `up` manual. Un deploy de un solo servicio no espera a RabbitMQ.
+
+**Deuda: resolver DNS de nginx (repo `techo360-frontend`, no modificado).** `nginx.conf` usa `proxy_pass http://backend:8000` / `http://chatbot:8000`, que nginx resuelve una sola vez al arrancar. Si backend o chatbot se recrean, nginx conserva la IP vieja hasta un `nginx -s reload` (visto el 26-sep-2026). Propuesta: `resolver 127.0.0.11 valid=10s;` y `proxy_pass` con variable (`set $backend http://backend:8000;`), cuidando que con variable el `proxy_pass` no recorta la URI y hay que revisar cada `location`.
+
 ## Primeros pasos en un servidor nuevo
 
 ```bash
