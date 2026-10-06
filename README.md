@@ -96,6 +96,30 @@ límite de puertos aprobados por el CCA.
 
 **Deuda: resolver DNS de nginx (repo `techo360-frontend`, no modificado).** `nginx.conf` usa `proxy_pass http://backend:8000` / `http://chatbot:8000`, que nginx resuelve una sola vez al arrancar. Si backend o chatbot se recrean, nginx conserva la IP vieja hasta un `nginx -s reload` (visto el 26-sep-2026). Propuesta: `resolver 127.0.0.11 valid=10s;` y `proxy_pass` con variable (`set $backend http://backend:8000;`), cuidando que con variable el `proxy_pass` no recorta la URI y hay que revisar cada `location`.
 
+**Bug de reconexión de consumers y prueba final en producción (6-oct-2026).** Un recreate de RabbitMQ dejaba a backend, chatbot y proyeccion conectados pero con `consumer_count=0` (sin excepción ni log): aio-pika 9.4.3 guarda las colas de cada canal en un `WeakSet` (`RobustChannel._queues`) y, al reconectar, restaura solo las que siguen vivas; en los tres servicios `queue` (y el canal, salvo en el chatbot) eran locales de `iniciar_consumidor()`. Reproducido en local y corregido reteniendo canal y cola a nivel de módulo (`_CHANNELS_VIVOS`, `_QUEUES_VIVAS`) en chatbot (`4c65a92`), proyeccion (`6a9494b`) y backend (`de0b224`, solo el consumer de persistencia; los clientes RPC abren canal y cola nuevos por petición y no lo necesitan). Cada repo trae `scripts/probar_reconexion_consumer.py` (recreate, restart y corte de red ×3 contra un RabbitMQ desechable).
+
+Prueba final: un solo `docker compose up -d --force-recreate --no-deps rabbitmq` bajo el candado compartido, con definiciones y estado respaldados antes (en `/opt/techo360/backups`, permisos 600). Medido (t = segundos desde el comando, UTC 21:14:17):
+
+| Hecho | t |
+|---|---|
+| Comando compose terminado; rabbitmq con ID nuevo (`8a19054f745e` → `e1bcbcb4f2d1`) | +3 s |
+| Los 3 servicios reciben `CONNECTION_FORCED` y reintentan cada 5 s (`Connection refused` mientras el broker arranca) | +1 s |
+| RabbitMQ abre el puerto 5672 (arranque de 71 s con `cpus: 0.2`) y acepta las 3 conexiones de backend, chatbot y proyeccion | +76 s |
+| Healthcheck en `healthy` (visto por el sondeo; intervalo de 20 s) | +97 s |
+| Nodo `rabbit@techo360-rabbitmq`: mismo directorio mnesia de antes (no se creó uno nuevo); `techo360` y `techo360-worker` con los mismos permisos, sin restaurar nada | +97 s a +115 s |
+| `chatbot_requests`, `chatbot_eventos_persistencia` y `proyeccion_requests` con `consumer_count=1` | visto a +126 s (el sondeo estaba ocupado con los chequeos de persistencia; la conexión ya estaba aceptada desde +76 s) |
+| Observación hasta +184 s: sin errores sostenidos (el último `Connection refused` fue a +71 s) | +184 s |
+
+Los `consumer_tag` fueron idénticos a los de antes del recreate (los restauró aio-pika, no un consumer nuevo). Backend, chatbot, proyeccion y frontend conservaron el mismo ID y `RestartCount=0`; nadie reinició nada. `/health` dio 200 y `/api/zonas` 401 (no 502).
+
+**Límites y deuda (alimentan T-126):**
+- Una petición RPC en vuelo durante un corte pierde su cola de respuesta exclusiva y termina en timeout (hasta 200 s).
+- La primera petición tras un `restart` de RabbitMQ puede fallar mientras el cliente reconecta; la siguiente responde (visto en las pruebas locales).
+- `connect_robust` de arranque no reintenta: si el broker no está disponible al iniciar, el proceso termina y el contenedor entra en bucle de reinicios (visto con el worker local sin Tailscale).
+- `deploy-infra.sh` no verifica que reaparezcan los consumers tras recrear RabbitMQ, y su `rabbitmqctl list_consumers ... priority` no funciona en RabbitMQ 3.13 (falla en silencio por el `|| true`).
+- Quedan 7 directorios `rabbit@<id>` huérfanos en el volumen `rabbitmq_data` (de recreates anteriores al `hostname` fijo), sin limpiar.
+- El `docker-compose.yml` solo pone `hostname` fijo a rabbitmq: el primer recreate con ese cambio (6-oct) sí arrancó con un nodo vacío; los siguientes ya conservan el estado.
+
 ## Primeros pasos en un servidor nuevo
 
 ```bash
