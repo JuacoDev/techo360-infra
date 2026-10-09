@@ -341,7 +341,8 @@ services:
         condition: service_started
     networks:
       - techo360-net
-    mem_limit: 512m
+    # 512m -> 256m (auditoria 2026-10-09: pico de 45 MiB; el modelo vive en ollama).
+    mem_limit: 256m
     cpus: 0.3
     # Sin puertos publicos: mismo criterio que el backend, se consume
     # internamente via el proxy del frontend (proxy_pass http://chatbot:8000/).
