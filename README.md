@@ -153,6 +153,68 @@ corra en producción en este servidor**. El entrenamiento/experimentación con
 modelos más grandes se hace en las GPUs locales del equipo (3050, 5060, RTX
 4000), no en este VPS.
 
+## Presupuesto de recursos (propuesta del 9-oct-2026, NO desplegada)
+
+Rama `feat/presupuesto-recursos`, apilada sobre `feat/recursos-vps-parte1` (PR #10). Desplegarla es el **paso 7** y necesita el «autorizo paso 7». Sustituye a la antigua «parte 2» de `cpuset`. Marcas: COMPROBADO = medido; HIPÓTESIS = inferido; «no verificado» = sin comprobar.
+
+**Premisa.** Ollama solo trabaja cuando llega un mensaje (los workers de laboratorio tienen prioridad 10 en `chatbot_requests`; el consumer del VPS es el respaldo, con prioridad 0). Cuando genera debe poder usar casi toda la CPU con prioridad; en reposo no debe retener recursos que otros necesitan. VPS: 6 vCPU (Xeon E5-4669 v4, 1 hilo por núcleo), 11 GiB de RAM, 4 GiB de swap, sin GPU.
+
+### CPU: prioridad en vez de cuotas ajustadas
+- **Sin `cpuset`:** todos los contenedores usan los 6 núcleos.
+- **`cpu_shares`:** solo decide el reparto cuando hay contención (en cgroup v2 Docker lo traduce a `cpu.weight`).
+- **`cpus`:** es un tope holgado contra servicios desbocados, no una cuota ajustada.
+- **Por qué:** con las cuotas antiguas (0,2–0,35) los Postgres pasaban ~36–39 % de sus periodos activos estrangulados (auditoría del 9-oct, COMPROBADO). Una consulta pesada de geometría se quedó clavada en su cuota el 67 % del tiempo.
+- **Prueba local de contención** (COMPROBADO en local; host emulado de 6 núcleos con `cpuset 0-5`; mismo modelo base `llama3.2:3b` con id `a80c4f17acd5`; 1.104 polígonos de ~200 vértices; 20 clientes concurrentes con `pgbench`; mediana de 3 corridas). Las cifras absolutas no son las de la VPS (CPU distinta); solo vale la comparación.
+
+| Escenario | p95 Postgres solo | p95 Postgres con Ollama generando | tok/s Ollama solo | tok/s Ollama con Postgres |
+|---|---|---|---|---|
+| Actual (pg 0,35, ollama 3 CPU) | 701 ms | 495 ms | 15,06 | 14,71 |
+| Parte 1 (pg 0,75) | 295 ms | 207 ms | 15,00 | 14,45 |
+| Este diseño, `num_thread` 3 | **94 ms** | **96 ms** | 15,35 | 14,42 |
+| Este diseño, `num_thread` 4 | 94 ms | 79 ms | 16,23 | **14,92** |
+| Este diseño, `num_thread` 5 | 93 ms | 91 ms (tps 598 → 432, máximos de 5,6–6,3 s) | 16,51 | **12,46** |
+
+- **`num_thread`:** lo fija el chatbot (`NUM_THREAD = 3` en `app/ollama_client.py`, D11 del 5-oct: 4,91 → 7,46 tokens/s con `cpus=3`). Mientras siga en 3, Ollama no usa más de ~3 núcleos aunque su tope sea 5. Con 5 hilos se degrada bajo carga: llama.cpp sincroniza sus hilos, así que un hilo desplazado frena a todos. **Recomendación: 4**, pero solo después de medirlo en la VPS con `scripts/medir-presupuesto-recursos.sh --ollama`. Es un cambio del chatbot (no de este compose) y también afecta a los workers, que usan el mismo código.
+
+### Memoria: techos, no reservas
+Reglas:
+- La suma de `mem_limit` no pasa de 9,5 GiB.
+- `memswap_limit` = `mem_limit` (ningún contenedor usa swap).
+- Cada techo es al menos el pico medido × 1,3.
+- En Postgres, `mem_limit` > `shared_buffers` + `work_mem` × conexiones esperadas.
+
+Los picos son `memory.peak` del cgroup desde el último arranque de cada contenedor (auditoría del 9-oct, COMPROBADO). Son ventanas cortas: no incluyen la ingesta semanal del backend ni carga real. Por eso los techos quedan por encima del pico × 1,3.
+
+### Valores por contenedor
+| Contenedor | `mem_limit` (antes → después) | Pico medido × 1,3 | `cpus` | `cpu_shares` | `oom_score_adj` | Razón |
+|---|---|---|---|---|---|---|
+| ollama | 3072m → **4096m** | 2,46 GiB → 3,2 GiB | 3.0 → **5.0** | 1024 → **4096** | 0 → **+500** | El modelo de 2,0 GB más contexto ya llegó al 82 % de 3 GiB. Mayor prioridad de CPU cuando genera; primero en morir ante un OOM (se recarga solo). |
+| postgres-principal | 512m → **1536m** | 259 MiB → 337 MiB | 0.35 → **2.0** | **1024** | **−500** | PostGIS y la geometría de `/api/zonas`: el techo deja espacio a la caché de páginas. Era el más estrangulado. |
+| backend | 512m → **896m** | 147 MiB → 191 MiB | 0.3 → **1.5** | **1024** | **−200** | API e ingesta semanal (no incluida en el pico medido). |
+| postgres-vector | 512m → **1024m** | 101 MiB → 131 MiB | 0.35 → **1.0** | **512** | **−500** | Conversaciones; preparado para el RAG futuro. |
+| rabbitmq | 256m → **576m** | 256 MiB (= tope) → 333 MiB | 0.2 → **1.0** | **512** | **−200** | Watermark absoluto de 270 MiB (≤ 50 % del límite; Erlang puede pedir el doble al recolectar). Con 230 MiB, la carga de 2.000 × 4 KB llegaba al 79–85 % del watermark. |
+| chatbot | 512m → **384m** | 45 MiB → 58 MiB | 0.3 → **1.0** | **512** | 0 | El modelo vive en ollama. |
+| proyeccion | 512m → **256m** | 134 MiB → 174 MiB | 0.3 → **1.0** | **512** | 0 | Series de tiempo. |
+| postgres-users | 256m → **384m** | 74 MiB → 96 MiB | 0.2 → **0.5** | **256** | **−500** | Lo usa cada login. |
+| redis | 128m → **256m** | 21 MiB → 27 MiB | 0.15 → **0.5** | **256** | 0 | Caché de `/api/zonas` (cuerpo gzip) y OTP. |
+| frontend | 128m → 128m | 9,4 MiB → 12 MiB | 0.15 → **0.5** | **256** | 0 | nginx estático. |
+| **Suma** | 6,25 GiB → **9,31 GiB** | | | | | Quedan ~1,7 GiB para el SO, dockerd, Tailscale y los runners aunque todos llegaran a su techo a la vez (HIPÓTESIS: no ocurre). |
+
+- **`memswap_limit` = `mem_limit` en todos:** antes Docker dejaba a cada contenedor usar en swap tanto como su `mem_limit` (6,25 GiB posibles frente a 4 GiB reales).
+- **`oom_score_adj`:** Docker 29.8 lo aplica (`/proc/1/oom_score_adj` = 500, −500 y −200, COMPROBADO en local). En la VPS (29.7.2) queda «no verificado» hasta el despliegue.
+- **`OLLAMA_KEEP_ALIVE`:** se deja el valor por defecto (5 min). Un valor corto liberaría ~2,5 GiB en reposo, pero el primer mensaje pagaría la carga en frío: 5–12 s en la VPS (README, 5-oct) o 3,0–3,3 s en local (COMPROBADO) sobre ~46 s por mensaje. El presupuesto ya cabe con Ollama en su techo, así que acortarlo no mejora nada medible.
+
+### Verificación
+- `scripts/verificar-presupuesto-recursos.sh` lee `docker compose config` y falla si se rompe alguna de las 6 reglas: suma ≤ 9,5 GiB; watermark ≤ 50 %; `memswap` = `mem`; Ollama con el mayor `cpu_shares`; Ollama con `cpus` ≤ 5; Postgres con `oom_score_adj` < 0. Sobre la parte 1 falla; sobre esta rama pasa.
+- `scripts/medir-presupuesto-recursos.sh` es la medición C1 de solo lectura para la VPS. Con `--ollama` (solo con autorización) mide tok/s con 3, 4 y 5 hilos y la carga en frío.
+
+### Pendiente de medir en la VPS (no se puede fuera de ella)
+- Línea base real de Ollama: 7,18 tok/s; ~46 s por mensaje.
+- El efecto de `num_thread` 4 y la carga en frío con el hardware real.
+- `shared_buffers`, `work_mem` y conexiones reales de cada Postgres.
+- Los picos con la ingesta semanal.
+- `oom_score_adj` en Docker 29.7.2.
+
 ## Base de datos de desarrollo (segundo Postgres aislado)
 
 Antes de integrar un cambio de esquema a cualquiera de las 3 bases reales, se
