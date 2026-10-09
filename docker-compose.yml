@@ -256,7 +256,7 @@ services:
     # (nr_throttled 22190/36423) y generaba ~1.3 tokens/s: las respuestas pasaban
     # de los 120 s de TIMEOUT_OLLAMA_S y el chatbot devolvia 503 (medido 04-oct-2026).
     # Con 3 CPU: ~5-7 tokens/s. Suma de limites de todos los servicios = 6.05 (antes 5.3) de las 6 CPU
-    # del VPS; con los cpuset, ollama tiene 3 nucleos propios y el resto comparte los otros 3.
+    # del VPS. (El aislamiento de nucleos con cpuset va aparte, en feat/recursos-vps-parte2.)
     cpus: 3.0
     # Este servidor NO tiene GPU. Si en algun momento se despliega en
     # un servidor con GPU NVIDIA, descomentar:
