@@ -258,6 +258,13 @@ services:
     # Con 3 CPU: ~5-7 tokens/s. Suma de limites de todos los servicios = 6.05 (antes 5.3) de las 6 CPU
     # del VPS; con los cpuset, ollama tiene 3 nucleos propios y el resto comparte los otros 3.
     cpus: 3.0
+    # Nucleos 3-5 SOLO para Ollama (auditoria 2026-10-09). Ollama/llama.cpp elige el
+    # numero de hilos segun las CPU que VE: sin cpuset ve 6 con una cuota de 3, y
+    # ~39 % de sus periodos terminaban estrangulados; ademas competia por los mismos
+    # nucleos con Postgres y el backend. Con cpuset ve 3. FALLBACK si el aislamiento
+    # no convence: quitar esta linea (y el cpuset "0-2" del resto) y fijar num_thread=3
+    # en las opciones de la peticion del chatbot (app/ollama_client.py).
+    cpuset: "3-5"
     # Este servidor NO tiene GPU. Si en algun momento se despliega en
     # un servidor con GPU NVIDIA, descomentar:
     # deploy:
