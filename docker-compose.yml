@@ -77,6 +77,12 @@ services:
     # 0.35 -> 0.75 (auditoria 2026-10-09: ~36 % de periodos con throttling; una
     # consulta pesada de geometria quedo clavada en la cuota, 67 % del tiempo estrangulada).
     cpus: 0.75
+    # cpuset "0-2" en todos los servicios menos ollama ("3-5"), para que no compitan
+    # por nucleos con la inferencia (auditoria 2026-10-09). Las cuotas (cpus) siguen
+    # siendo topes: estos 9 servicios suman 3,05 sobre 3 nucleos, con un uso medio
+    # medido de 0,03 CPU en total. El SO, dockerd, Tailscale y los runners de GitHub
+    # no estan fijados (pueden usar los 6).
+    cpuset: "0-2"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_PRINCIPAL_USER} -d ${DB_PRINCIPAL_NAME}"]
       interval: 10s
@@ -108,6 +114,7 @@ services:
     memswap_limit: 512m
     # 0.35 -> 0.5 (auditoria 2026-10-09: ~39 % de periodos con throttling).
     cpus: 0.5
+    cpuset: "0-2"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_VECTOR_USER} -d ${DB_VECTOR_NAME}"]
       interval: 10s
@@ -138,6 +145,7 @@ services:
     memswap_limit: 256m
     # 0.2 -> 0.3 (auditoria 2026-10-09: ~38 % de periodos con throttling; lo usa cada login).
     cpus: 0.3
+    cpuset: "0-2"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USERS_USER} -d ${DB_USERS_NAME}"]
       interval: 10s
@@ -164,6 +172,7 @@ services:
     mem_limit: 128m
     memswap_limit: 128m
     cpus: 0.15
+    cpuset: "0-2"
     # Cache + OTP, sin necesidad de volumen persistente
 
   rabbitmq:
@@ -194,6 +203,7 @@ services:
     mem_limit: 384m
     memswap_limit: 384m
     cpus: 0.3
+    cpuset: "0-2"
     # rabbitmq-diagnostics ping no necesita credenciales (chequea el nodo
     # erlang, no una cuenta) -- confirmado real: sin este healthcheck, el
     # backend (depends_on: rabbitmq condition: service_started) podia
@@ -314,6 +324,7 @@ services:
     mem_limit: 512m
     memswap_limit: 512m
     cpus: 0.3
+    cpuset: "0-2"
     # Sin puertos publicos: el frontend lo consume internamente por nombre
     # de servicio (proxy_pass http://backend:8000/), segun los puertos
     # aprobados por el CCA (solo 22/80/443/5432 hacia internet).
@@ -362,6 +373,7 @@ services:
     mem_limit: 256m
     memswap_limit: 256m
     cpus: 0.3
+    cpuset: "0-2"
     # Sin puertos publicos: mismo criterio que el backend, se consume
     # internamente via el proxy del frontend (proxy_pass http://chatbot:8000/).
 
@@ -411,6 +423,7 @@ services:
     mem_limit: 512m
     memswap_limit: 512m
     cpus: 0.3
+    cpuset: "0-2"
     # Sin puertos publicos: el frontend no la llama directo, solo via
     # RabbitMQ (a traves del backend), segun la arquitectura definida.
 
@@ -445,3 +458,4 @@ services:
     mem_limit: 128m
     memswap_limit: 128m
     cpus: 0.15
+    cpuset: "0-2"
