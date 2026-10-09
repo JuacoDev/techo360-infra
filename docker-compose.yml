@@ -80,6 +80,7 @@ services:
     # Postgres un ~36-39 % de sus periodos activos; auditoria del 09-oct).
     cpus: 2.0
     cpu_shares: 1024
+    oom_score_adj: -500
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_PRINCIPAL_USER} -d ${DB_PRINCIPAL_NAME}"]
       interval: 10s
@@ -111,6 +112,7 @@ services:
     memswap_limit: 1024m
     cpus: 1.0
     cpu_shares: 512
+    oom_score_adj: -500
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_VECTOR_USER} -d ${DB_VECTOR_NAME}"]
       interval: 10s
@@ -141,6 +143,7 @@ services:
     memswap_limit: 384m
     cpus: 0.5
     cpu_shares: 256
+    oom_score_adj: -500
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USERS_USER} -d ${DB_USERS_NAME}"]
       interval: 10s
@@ -202,6 +205,7 @@ services:
     memswap_limit: 576m
     cpus: 1.0
     cpu_shares: 512
+    oom_score_adj: -200
     # rabbitmq-diagnostics ping no necesita credenciales (chequea el nodo
     # erlang, no una cuenta) -- confirmado real: sin este healthcheck, el
     # backend (depends_on: rabbitmq condition: service_started) podia
@@ -269,6 +273,10 @@ services:
     # ~3 nucleos aunque el tope sea 5: subirlo es un cambio del chatbot, medido en la VPS.
     cpus: 5.0
     cpu_shares: 4096
+    # oom_score_adj: si el host se queda sin memoria, el kernel mata primero a ollama
+    # (+500: se recarga solo en la siguiente peticion) y protege a los Postgres (-500) y a
+    # rabbitmq y backend (-200). Los demas quedan en 0 (valor por defecto).
+    oom_score_adj: 500
     # Este servidor NO tiene GPU. Si en algun momento se despliega en
     # un servidor con GPU NVIDIA, descomentar:
     # deploy:
@@ -319,6 +327,7 @@ services:
     memswap_limit: 896m
     cpus: 1.5
     cpu_shares: 1024
+    oom_score_adj: -200
     # Sin puertos publicos: el frontend lo consume internamente por nombre
     # de servicio (proxy_pass http://backend:8000/), segun los puertos
     # aprobados por el CCA (solo 22/80/443/5432 hacia internet).
