@@ -157,7 +157,12 @@ modelos más grandes se hace en las GPUs locales del equipo (3050, 5060, RTX
 
 Rama `feat/presupuesto-recursos`, apilada sobre `feat/recursos-vps-parte1` (PR #10). Desplegarla es el **paso 7** y necesita el «autorizo paso 7». Sustituye a la antigua «parte 2» de `cpuset`. Marcas: COMPROBADO = medido; HIPÓTESIS = inferido; «no verificado» = sin comprobar.
 
-**Premisa.** Ollama solo trabaja cuando llega un mensaje (los workers de laboratorio tienen prioridad 10 en `chatbot_requests`; el consumer del VPS es el respaldo, con prioridad 0). Cuando genera debe poder usar casi toda la CPU con prioridad; en reposo no debe retener recursos que otros necesitan. VPS: 6 vCPU (Xeon E5-4669 v4, 1 hilo por núcleo), 11 GiB de RAM, 4 GiB de swap, sin GPU.
+**Premisa.** Ollama solo trabaja cuando llega un mensaje. Cuando genera debe poder usar casi toda la CPU con prioridad; en reposo no debe retener recursos que otros necesitan.
+
+**Cadena de prioridad real del chatbot (COMPROBADO en el código y en el log del 9-oct).** Los workers de laboratorio (`techo360-workers`, Ollama fuera de la VPS) consumen `chatbot_requests` con prioridad de consumidor **10**; el consumer del chatbot de la VPS tiene prioridad **0**; todos con `prefetch 1`. RabbitMQ entrega primero a los consumidores de mayor prioridad que estén libres y, mientras uno esté ocupado o desconectado, el mensaje va al siguiente. Consecuencias para el dimensionado:
+- El Ollama de la VPS **no es «solo el último recurso»**: recibe todo lo que los workers no pueden tomar (todos ocupados, caídos o sin red). El 9-oct, con el worker caído, la VPS atendió 8 de 10 envíos.
+- Por eso se dimensiona para atender la carga completa cuando haga falta (prioridad de CPU máxima, techo de memoria holgado sobre el pico medido), no como una reserva simbólica.
+- Cuantos más workers estables haya, menos trabajo llega a la VPS, pero el diseño no debe depender de ello. VPS: 6 vCPU (Xeon E5-4669 v4, 1 hilo por núcleo), 11 GiB de RAM, 4 GiB de swap, sin GPU.
 
 ### CPU: prioridad en vez de cuotas ajustadas
 - **Sin `cpuset`:** todos los contenedores usan los 6 núcleos.
@@ -188,32 +193,41 @@ Los picos son `memory.peak` del cgroup desde el último arranque de cada contene
 ### Valores por contenedor
 | Contenedor | `mem_limit` (antes → después) | Pico medido × 1,3 | `cpus` | `cpu_shares` | `oom_score_adj` | Razón |
 |---|---|---|---|---|---|---|
-| ollama | 3072m → **4096m** | 2,46 GiB → 3,2 GiB | 3.0 → **5.0** | 1024 → **4096** | 0 → **+500** | El modelo de 2,0 GB más contexto ya llegó al 82 % de 3 GiB. Mayor prioridad de CPU cuando genera; primero en morir ante un OOM (se recarga solo). |
-| postgres-principal | 512m → **1536m** | 259 MiB → 337 MiB | 0.35 → **2.0** | **1024** | **−500** | PostGIS y la geometría de `/api/zonas`: el techo deja espacio a la caché de páginas. Era el más estrangulado. |
+| ollama | 3072m → **3328m** | 2,46 GiB → 3,2 GiB | 3.0 → **5.0** | 1024 → **4096** | 0 → **+500** | El modelo de 2,0 GB más contexto ya llegó al 82 % de 3 GiB. Mayor prioridad de CPU cuando genera; primero en morir ante un OOM (se recarga solo). |
+| postgres-principal | 512m → **1024m** | 304 MiB → 395 MiB | 0.35 → **2.0** | **1024** | **−500** | PostGIS y la geometría de `/api/zonas`: el techo deja espacio a la caché de páginas (`shared_buffers` 128 MB, `work_mem` 4 MB, `max_connections` 100). Era el más estrangulado. No bajarlo hasta re-medir (ver «Cómo re-medir Postgres»). |
 | backend | 512m → **896m** | 147 MiB → 191 MiB | 0.3 → **1.5** | **1024** | **−200** | API e ingesta semanal (no incluida en el pico medido). |
-| postgres-vector | 512m → **1024m** | 101 MiB → 131 MiB | 0.35 → **1.0** | **512** | **−500** | Conversaciones; preparado para el RAG futuro. |
+| postgres-vector | 512m → **512m** | 101 MiB → 131 MiB | 0.35 → **1.0** | **512** | **−500** | Conversaciones; preparado para el RAG futuro. |
 | rabbitmq | 256m → **576m** | 256 MiB (= tope) → 333 MiB | 0.2 → **1.0** | **512** | **−200** | Watermark absoluto de 270 MiB (≤ 50 % del límite; Erlang puede pedir el doble al recolectar). Con 230 MiB, la carga de 2.000 × 4 KB llegaba al 79–85 % del watermark. |
 | chatbot | 512m → **384m** | 45 MiB → 58 MiB | 0.3 → **1.0** | **512** | 0 | El modelo vive en ollama. |
 | proyeccion | 512m → **256m** | 134 MiB → 174 MiB | 0.3 → **1.0** | **512** | 0 | Series de tiempo. |
-| postgres-users | 256m → **384m** | 74 MiB → 96 MiB | 0.2 → **0.5** | **256** | **−500** | Lo usa cada login. |
+| postgres-users | 256m → **256m** | 74 MiB → 96 MiB | 0.2 → **0.5** | **256** | **−500** | Lo usa cada login. |
 | redis | 128m → **256m** | 21 MiB → 27 MiB | 0.15 → **0.5** | **256** | 0 | Caché de `/api/zonas` (cuerpo gzip) y OTP. |
 | frontend | 128m → 128m | 9,4 MiB → 12 MiB | 0.15 → **0.5** | **256** | 0 | nginx estático. |
-| **Suma** | 6,25 GiB → **9,31 GiB** | | | | | Quedan ~1,7 GiB para el SO, dockerd, Tailscale y los runners aunque todos llegaran a su techo a la vez (HIPÓTESIS: no ocurre). |
+| **Suma** | 6,25 GiB → **7,44 GiB** | | | | | Quedan ~3,5 GiB para el SO, dockerd, Tailscale, los runners y la caché de página aunque todos llegaran a su techo a la vez (HIPÓTESIS: no ocurre). |
 
 - **`memswap_limit` = `mem_limit` en todos:** antes Docker dejaba a cada contenedor usar en swap tanto como su `mem_limit` (6,25 GiB posibles frente a 4 GiB reales).
 - **`oom_score_adj`:** Docker 29.8 lo aplica (`/proc/1/oom_score_adj` = 500, −500 y −200, COMPROBADO en local). En la VPS (29.7.2) queda «no verificado» hasta el despliegue.
-- **`OLLAMA_KEEP_ALIVE`:** se deja el valor por defecto (5 min). Un valor corto liberaría ~2,5 GiB en reposo, pero el primer mensaje pagaría la carga en frío: 5–12 s en la VPS (README, 5-oct) o 3,0–3,3 s en local (COMPROBADO) sobre ~46 s por mensaje. El presupuesto ya cabe con Ollama en su techo, así que acortarlo no mejora nada medible.
+- **`OLLAMA_KEEP_ALIVE`:** se fija explícito en `5m` (el valor por defecto, para que no dependa de la versión de la imagen). Un valor corto liberaría ~2,5 GiB en reposo, pero el primer mensaje pagaría la carga en frío: 5–12 s en la VPS (README, 5-oct) o 3,0–3,3 s en local (COMPROBADO) sobre ~46 s por mensaje. El presupuesto ya cabe con Ollama en su techo, así que acortarlo no mejora nada medible.
 
 ### Verificación
-- `scripts/verificar-presupuesto-recursos.sh` lee `docker compose config` y falla si se rompe alguna de las 6 reglas: suma ≤ 9,5 GiB; watermark ≤ 50 %; `memswap` = `mem`; Ollama con el mayor `cpu_shares`; Ollama con `cpus` ≤ 5; Postgres con `oom_score_adj` < 0. Sobre la parte 1 falla; sobre esta rama pasa.
+- `scripts/verificar-presupuesto-recursos.sh` lee `docker compose config` y falla si se rompe alguna de las 6 reglas: suma ≤ 9,5 GiB; watermark ≤ 50 %; `memswap` = `mem`; Ollama con el mayor `cpu_shares`; Ollama con `cpus` ≤ 5; Postgres con `oom_score_adj` < 0. Sobre la parte 1 falla; sobre esta rama pasa (suma 7,44 GiB; watermark 46,9 %).
 - `scripts/medir-presupuesto-recursos.sh` es la medición C1 de solo lectura para la VPS. Con `--ollama` (solo con autorización) mide tok/s con 3, 4 y 5 hilos y la carga en frío.
 
 ### Pendiente de medir en la VPS (no se puede fuera de ella)
 - Línea base real de Ollama: 7,18 tok/s; ~46 s por mensaje.
 - El efecto de `num_thread` 4 y la carga en frío con el hardware real.
-- `shared_buffers`, `work_mem` y conexiones reales de cada Postgres.
-- Los picos con la ingesta semanal.
+- Conexiones reales de cada Postgres (valores actuales medidos: `shared_buffers` 128 MB, `max_connections` 100, `work_mem` 4 MB).
+- Los picos con la ingesta semanal (lunes 03:00 UTC).
 - `oom_score_adj` en Docker 29.7.2.
+
+### Cómo re-medir Postgres (antes de bajar sus techos)
+Los techos de Postgres (1024m / 512m / 256m) son generosos a propósito: el pico medido (304 / 101 / 74 MiB) **no incluye** una ingesta semanal real. No bajarlos hasta tener una ingesta medida con los contenedores ya recreados (`memory.peak` se reinicia al recrear):
+1. Esperar al lunes 03:00 UTC (ingesta) y medir pasados ~30 min: `scripts/medir-presupuesto-recursos.sh` (solo lectura) y, por contenedor, `docker exec <c> cat /sys/fs/cgroup/memory.peak /sys/fs/cgroup/memory.events` (campos `oom` y `oom_kill` deben seguir en 0).
+2. Si `memory.peak × 1,3` cabe con holgura por debajo del techo actual durante 2 ingestas seguidas, proponer el nuevo techo en un PR aparte.
+
+### Despliegue (paso 7) y subida en caliente del backend (paso 7a)
+- `docs/runbook-paso-7a.md`: subir en caliente la memoria del backend de 512m a 896m (`docker update`), antes de la ingesta del lunes. No recrea nada.
+- `docs/runbook-paso-7.md`: ventana nocturna para recrear los 10 contenedores con este presupuesto, en dos lotes, con criterio de aborto y reversa.
 
 ## Base de datos de desarrollo (segundo Postgres aislado)
 
