@@ -167,13 +167,21 @@ services:
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 1:1 +sbwt none +sbwtdcpu none +sbwtdio none"
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq/20-techo360.conf:/etc/rabbitmq/conf.d/20-techo360.conf:ro
     networks:
       - techo360-net
-    mem_limit: 256m
-    cpus: 0.2
+    # Recursos (auditoria 2026-10-09): tocaba su limite de memoria (memory.peak =
+    # 256 MiB, 43 eventos "max", 13 MB en swap) y pasaba ~43 % de sus periodos con
+    # throttling de CPU con un uso medio de 0,048 CPU: Erlang arrancaba 6 schedulers
+    # (ve las 6 CPU del host) con una cuota de 0,2 y gira esperando trabajo (busy-wait).
+    # +S 1:1 = 1 scheduler; +sbwt* none = sin busy-wait. Ver rabbitmq/20-techo360.conf
+    # para el watermark de memoria.
+    mem_limit: 384m
+    cpus: 0.3
     # rabbitmq-diagnostics ping no necesita credenciales (chequea el nodo
     # erlang, no una cuenta) -- confirmado real: sin este healthcheck, el
     # backend (depends_on: rabbitmq condition: service_started) podia
