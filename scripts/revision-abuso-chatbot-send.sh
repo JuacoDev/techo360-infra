@@ -22,7 +22,9 @@ set -u
 # OJO: con `bash -s < script`, cualquier comando que lea stdin se traga el resto del
 # script. Por eso los docker exec que no necesitan entrada llevan `< /dev/null`.
 F=techo360-frontend; C=techo360-chatbot; B=techo360-backend; R=techo360-rabbitmq
-V=techo360-postgres-vector; U=techo360-postgres-users
+# Usuarios: el login del backend lee DATABASE_URL = postgres-principal (mapcaloruser).
+# postgres-users NO es la fuente de verdad y da falsos "usuario_inexistente".
+V=techo360-postgres-vector; U=techo360-postgres-principal
 
 seccion() { printf '\n==================== %s ====================\n' "$1"; }
 
@@ -37,9 +39,11 @@ seccion "1. nginx: /chatbot/send (dia, metodo, codigo)"
 docker logs "$F" 2>/dev/null | awk '
   $7 ~ /^\/chatbot\/send/ {
     split($4, t, ":"); dia = substr(t[1], 2); metodo = substr($6, 2)
-    n[dia " " metodo " " $9]++
+    n[dia " " metodo " " $9]++; total++
   }
-  END { if (length(n) == 0) print "(ninguna peticion a /chatbot/send en la ventana de logs)"; for (k in n) print k, n[k] }' | sort
+  # Contador aparte: length(n) sobre un arreglo nunca asignado rompe gawk
+  # ("attempt to use scalar as array") cuando no hay ninguna coincidencia.
+  END { if (total == 0) print "(ninguna peticion a /chatbot/send en la ventana de logs)"; for (k in n) print k, n[k] }' | sort
 
 seccion "1b. nginx: /chatbot/send por IP agrupada (/24) y por user-agent (top 10)"
 docker logs "$F" 2>/dev/null | awk '$7 ~ /^\/chatbot\/send/ { split($1, o, "."); print o[1] "." o[2] "." o[3] ".0/24" }' | sort | uniq -c | sort -rn | head -10
@@ -53,17 +57,19 @@ seccion "1d. nginx: otras rutas del servicio chatbot expuestas (docs/openapi/hea
 docker logs "$F" 2>/dev/null | awk '$7 ~ /^\/chatbot\/(docs|redoc|openapi\.json|health)/ { print $6 " " $7 " " $9 }' | sed 's/"//' | sort | uniq -c
 
 seccion "2. chatbot (uvicorn): POST /chatbot/send por dia y codigo"
-docker logs -t "$C" 2>&1 | awk '/"POST \/chatbot\/send/ { dia = substr($1, 1, 10); for (i = 1; i <= NF; i++) if ($i ~ /^HTTP\//) cod = $(i + 1); n[dia " " cod]++ }
-  END { if (length(n) == 0) print "(ninguna)"; for (k in n) print k, n[k] }' | sort
+docker logs -t "$C" 2>&1 | awk '/"POST \/chatbot\/send/ { dia = substr($1, 1, 10); for (i = 1; i <= NF; i++) if ($i ~ /^HTTP\//) cod = $(i + 1); n[dia " " cod]++; total++ }
+  END { if (total == 0) print "(ninguna)"; for (k in n) print k, n[k] }' | sort
 
 seccion "3. backend: consumer de chatbot_eventos_persistencia (errores y descartes por dia)"
 docker logs -t "$B" 2>&1 | grep -E "payload invalido|No se pudo persistir|descartado" | awk '{ print substr($1, 1, 10) }' | sort | uniq -c
-docker logs -t "$B" 2>&1 | grep -c "Consumidor de 'chatbot_eventos_persistencia' arrancado" | sed 's/^/arranques del consumer en la ventana: /'
+# El backend no imprime logs INFO, asi que no hay linea de arranque que contar: que el
+# consumer esta vivo se ve en la columna 'consumers' de la seccion 4.
+echo "(el arranque del consumer no se registra en los logs del backend; ver seccion 4)"
 
 seccion "4. RabbitMQ: cola chatbot_eventos_persistencia (rabbitmqctl tarda ~6-7 s)"
 docker exec "$R" rabbitmqctl -q list_queues name messages consumers 2>/dev/null < /dev/null | awk '$1 == "chatbot_eventos_persistencia" || NR == 1'
 
-seccion "5. postgres-users: numero de usuarios (solo el conteo)"
+seccion "5. postgres-principal: numero de usuarios (solo el conteo)"
 # Los ids se pasan a postgres-vector por la tuberia y NUNCA se imprimen.
 IDS=$(docker exec "$U" sh -c 'psql -X -q -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "BEGIN READ ONLY; SELECT coalesce(string_agg(id::text, '"','"'), '"''"') FROM mapcaloruser; COMMIT;"' < /dev/null | grep -vE '^(BEGIN|COMMIT)$' | tail -1)
 echo "usuarios en mapcaloruser: $(echo "$IDS" | tr ',' '\n' | grep -c .)"
@@ -85,8 +91,9 @@ SELECT fecha::date AS dia, count(*) FROM conversaciones GROUP BY 1 ORDER BY 1;
 \echo '-- 6.3 mensajes por dia y rol'
 SELECT fecha::date AS dia, rol, count(*) FROM mensajes GROUP BY 1, 2 ORDER BY 1, 2;
 
-\echo '-- 6.4 conversaciones sin usuario dueno valido (usuario_id no existe en postgres-users, o <= 0)'
-SELECT count(*) FILTER (WHERE NOT (usuario_id = ANY (:'ids'::int[]))) AS usuario_inexistente,
+\echo '-- 6.4 conversaciones sin usuario dueno valido (usuario_id no existe en postgres-principal, o <= 0)'
+\echo '--     usuario 0 = evaluaciones de R1 (scripts/probar_rabbitmq_local.py), va aparte'
+SELECT count(*) FILTER (WHERE usuario_id > 0 AND NOT (usuario_id = ANY (:'ids'::int[]))) AS usuario_inexistente,
        count(*) FILTER (WHERE usuario_id <= 0) AS usuario_cero_o_negativo
   FROM conversaciones;
 
@@ -95,9 +102,10 @@ SELECT (SELECT count(*) FROM mensajes m WHERE NOT EXISTS (SELECT 1 FROM conversa
        (SELECT count(*) FROM mensajes WHERE rol NOT IN ('usuario', 'asistente')) AS rol_invalido;
 
 \echo '-- 6.6 huella del camino /chatbot/send -> consumer: par usuario->asistente con menos de 5 s'
-\echo '--     entre ambos (el camino real del backend espera a Ollama: ~46 s por mensaje)'
+\echo '--     entre ambos (el camino real del backend espera a Ollama: ~46 s por mensaje).'
+\echo '--     El consumer escribe ambos seguidos: < 0,5 s es su huella; el backend nunca baja de ~1 s.'
 WITH pares AS (
-    SELECT m.conversacion_id, m.fecha AS f_usuario, m.intentos,
+    SELECT m.conversacion_id, m.fecha AS f_usuario, m.intentos, m.rol,
            lead(m.rol)   OVER w AS rol_sig,
            lead(m.fecha) OVER w AS f_sig
       FROM mensajes m
@@ -105,26 +113,28 @@ WITH pares AS (
 )
 SELECT count(*) FILTER (WHERE rol_sig = 'asistente') AS pares_total,
        count(*) FILTER (WHERE rol_sig = 'asistente' AND f_sig - f_usuario < interval '5 seconds') AS pares_rapidos_lt5s,
+       count(*) FILTER (WHERE rol_sig = 'asistente' AND f_sig - f_usuario < interval '0.5 seconds') AS pares_lt0_5s,
        count(DISTINCT conversacion_id) FILTER (WHERE rol_sig = 'asistente' AND f_sig - f_usuario < interval '5 seconds') AS conversaciones_con_pares_rapidos,
        round(min(extract(epoch FROM f_sig - f_usuario)) FILTER (WHERE rol_sig = 'asistente')::numeric, 1) AS seg_min,
        round((percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM f_sig - f_usuario)) FILTER (WHERE rol_sig = 'asistente'))::numeric, 1) AS seg_mediana,
        round(max(extract(epoch FROM f_sig - f_usuario)) FILTER (WHERE rol_sig = 'asistente')::numeric, 1) AS seg_max
-  FROM pares;
+  FROM pares WHERE rol = 'usuario';
 
 \echo '-- 6.7 pares rapidos por dia, y si cayeron en una conversacion que YA existia (>60 s antes = posible inyeccion en ajena)'
 WITH pares AS (
-    SELECT m.conversacion_id, m.fecha AS f_usuario,
+    SELECT m.conversacion_id, m.fecha AS f_usuario, m.rol,
            lead(m.rol) OVER w AS rol_sig, lead(m.fecha) OVER w AS f_sig
       FROM mensajes m
     WINDOW w AS (PARTITION BY m.conversacion_id ORDER BY m.fecha, m.id)
 )
 SELECT p.f_usuario::date AS dia,
+       CASE WHEN c.usuario_id = 0 THEN 'usuario_0' ELSE 'usuario_mayor_0' END AS grupo,
        count(*) AS pares_rapidos,
        count(*) FILTER (WHERE p.f_usuario - c.fecha > interval '60 seconds') AS en_conversacion_preexistente,
        count(*) FILTER (WHERE c.consentimiento_entrenamiento) AS con_consentimiento
   FROM pares p JOIN conversaciones c ON c.id = p.conversacion_id
- WHERE p.rol_sig = 'asistente' AND p.f_sig - p.f_usuario < interval '5 seconds'
- GROUP BY 1 ORDER BY 1;
+ WHERE p.rol = 'usuario' AND p.rol_sig = 'asistente' AND p.f_sig - p.f_usuario < interval '5 seconds'
+ GROUP BY 1, 2 ORDER BY 1, 2;
 
 \echo '-- 6.8 mensajes de usuario respondidos con intentos = 0 desde la migracion 0002 (indicador secundario:'
 \echo '--     el camino con estados del backend deja intentos >= 1; el consumer y el camino legado dejan 0)'
