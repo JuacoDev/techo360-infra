@@ -56,6 +56,12 @@ Tras `backend`: probar login y un `GET /api/zonas` desde el navegador (Juan). Tr
 
 ## 4. Lote 1b — RabbitMQ (tiene estado: colas)
 Solo con colas vacías (§0). `flock … docker compose up -d --no-deps rabbitmq`. Esperar `healthy` (~10 s de mediana medida en local, hasta 60 s). Verificar: watermark leído de la configuración real (`docker exec techo360-rabbitmq rabbitmqctl status | grep -A1 -i "memory high watermark"` → 283115520 bytes = 270 MiB), `oom_adj=-200`, `mem=603979776`.
+**Riesgo nuevo (9-oct-2026): alarmas de memoria ligadas a Ollama.** Hoy RabbitMQ (watermark 4781 MiB, sin absoluto) entra en alarma de memoria justo después de cada carga en frío del modelo de Ollama y sale unos 5 min después del último uso: 4 de 4 alarmas desde el 06-oct (01:53, 05:49, 17:40 y 17:46 UTC) empiezan 4–41 s tras un `starting llama-server`, y duran ≈ `keep_alive` (5 min) tras la última generación. El mecanismo NO está determinado: RabbitMQ lee 0,17 GB (`rss`) y su cgroup solo tiene 43 MiB de caché de página, así que no puede ser su propia memoria. Si lo que lee incluye memoria del host (p. ej. el modelo cargado), **un watermark absoluto de 270 MiB podría quedar en alarma permanente y bloquear a los publicadores** (backend y chatbot). En la prueba local de 270 MiB no ocurrió (host sin Ollama cargado), pero no es la misma situación. Por eso, tras recrear RabbitMQ y con el chatbot ya arriba:
+1. Con Juan, enviar **un mensaje real** (fuerza la carga en frío de Ollama) y vigilar 90 s: `docker exec --user rabbitmq techo360-rabbitmq rabbitmq-diagnostics -q alarms` cada 10 s y `rabbitmqctl status | grep -i "total memory used"`.
+2. Sin alarma, o alarma que se limpia sola y NO bloquea (la respuesta llega): continuar.
+3. Alarma sostenida o respuesta que no llega: **abortar y revertir solo RabbitMQ** (`git checkout c88e518 -- rabbitmq/20-techo360.conf` y recrear `rabbitmq`) y dejar el watermark relativo hasta entender el mecanismo.
+Usar `--user rabbitmq` en `docker exec` con las herramientas de RabbitMQ (como root el nodo se cae por la cookie).
+
 **Riesgo conocido (T-127):** los consumers pueden no reconectar tras recrear RabbitMQ. Comprobar `list_consumers`: deben aparecer el chatbot de la VPS (prioridad 0) **y los workers externos** (prioridad 10). Si falta alguno, `docker restart techo360-chatbot` y avisar a Juan para reiniciar el worker de su PC.
 
 ## 5. Lote 2 — Postgres, uno por uno, al final
