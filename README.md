@@ -153,11 +153,11 @@ corra en producción en este servidor**. El entrenamiento/experimentación con
 modelos más grandes se hace en las GPUs locales del equipo (3050, 5060, RTX
 4000), no en este VPS.
 
-## RabbitMQ: avisos de cancelación del chatbot (propuesto 9-oct-2026, NO aplicado)
+## RabbitMQ: avisos de cancelación del chatbot (permisos aplicados el 10-oct-2026 en eb41fcc)
 El backend publica un aviso `{"mensaje_id", "intento"}` en el exchange **fanout no durable** `chatbot_cancelaciones` al cancelar un mensaje en vuelo; cada consumer del chatbot (VPS y workers) se enlaza con su cola exclusiva `chatbot_cancelaciones.<32 hex>` y aborta esa generación. El exchange lo crea el primero que lo declara (backend o consumer); no hace falta una definición previa.
 - **Usuario de los workers (`techo360-worker`)**: `scripts/rabbitmq-worker-user.sh` añade permisos con nombres exactos (sin `.*`): configure en el exchange y en `chatbot_cancelaciones.<32 hex>`; write solo en esa cola (bind) y read en el exchange y en la cola. **No** tiene write en el exchange: un worker no puede falsificar avisos.
 - **Probado** contra un RabbitMQ 3.13 desechable: con los permisos actuales el consumer arranca y trabaja igual (solo un `warning` y cancelar no aborta); con los propuestos se suscribe, y quedan rechazados publicar en el exchange, declarar colas ajenas o con prefijo sin uuid hex, y consumir `chatbot_eventos_persistencia`.
-- **Aplicación**: el script corre en `deploy-infra` (paso 5) cuando hay `WORKER_RABBITMQ_PASSWORD`; el cambio de permisos surtirá efecto en el primer deploy de infra tras fusionarlo a `development`. Reversa: restaurar los tres patrones anteriores (`^(chatbot_requests|chatbot_eventos_persistencia)?$`, `^(chatbot_requests|chatbot_eventos_persistencia|amq\.default)$`, `^chatbot_requests$`) y volver a correr el script.
+- **Aplicación**: aplicado el 10-oct-2026 en `eb41fcc` por el paso 5 de `deploy-infra` (run `38008978058`); verificado por la API de management que `techo360-worker` tiene exactamente estos patrones. Reversa: restaurar los tres patrones anteriores (`^(chatbot_requests|chatbot_eventos_persistencia)?$`, `^(chatbot_requests|chatbot_eventos_persistencia|amq\.default)$`, `^chatbot_requests$`) y volver a correr el script.
 
 ## Base de datos de desarrollo (segundo Postgres aislado)
 
