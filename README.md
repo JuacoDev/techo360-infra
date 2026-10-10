@@ -229,6 +229,12 @@ Los techos de Postgres (1024m / 512m / 256m) son generosos a propósito: el pico
 - `docs/runbook-paso-7a.md`: subir en caliente la memoria del backend de 512m a 896m (`docker update`), antes de la ingesta del lunes. No recrea nada.
 - `docs/runbook-paso-7.md`: ventana nocturna para recrear los 10 contenedores con este presupuesto, en dos lotes, con criterio de aborto y reversa.
 
+## RabbitMQ: avisos de cancelación del chatbot (propuesto 9-oct-2026, NO aplicado)
+El backend publica un aviso `{"mensaje_id", "intento"}` en el exchange **fanout no durable** `chatbot_cancelaciones` al cancelar un mensaje en vuelo; cada consumer del chatbot (VPS y workers) se enlaza con su cola exclusiva `chatbot_cancelaciones.<32 hex>` y aborta esa generación. El exchange lo crea el primero que lo declara (backend o consumer); no hace falta una definición previa.
+- **Usuario de los workers (`techo360-worker`)**: `scripts/rabbitmq-worker-user.sh` añade permisos con nombres exactos (sin `.*`): configure en el exchange y en `chatbot_cancelaciones.<32 hex>`; write solo en esa cola (bind) y read en el exchange y en la cola. **No** tiene write en el exchange: un worker no puede falsificar avisos.
+- **Probado** contra un RabbitMQ 3.13 desechable: con los permisos actuales el consumer arranca y trabaja igual (solo un `warning` y cancelar no aborta); con los propuestos se suscribe, y quedan rechazados publicar en el exchange, declarar colas ajenas o con prefijo sin uuid hex, y consumir `chatbot_eventos_persistencia`.
+- **Aplicación**: el script corre en `deploy-infra` (paso 5) cuando hay `WORKER_RABBITMQ_PASSWORD`; el cambio de permisos surtirá efecto en el primer deploy de infra tras fusionarlo a `development`. Reversa: restaurar los tres patrones anteriores (`^(chatbot_requests|chatbot_eventos_persistencia)?$`, `^(chatbot_requests|chatbot_eventos_persistencia|amq\.default)$`, `^chatbot_requests$`) y volver a correr el script.
+
 ## Base de datos de desarrollo (segundo Postgres aislado)
 
 Antes de integrar un cambio de esquema a cualquiera de las 3 bases reales, se

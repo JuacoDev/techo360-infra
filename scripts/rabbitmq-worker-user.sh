@@ -17,6 +17,15 @@
 #     "ACCESS_REFUSED - write access to exchange 'amq.default' ...
 #     refused for user 'techo360-worker'" -- confirmado real al validar
 #     el primer worker (27-sep-2026).
+#   - AVISOS DE CANCELACION (techo360-chatbot, app/rabbitmq_consumer.py): el
+#     worker declara el exchange fanout `chatbot_cancelaciones` (configure),
+#     una cola exclusiva propia `chatbot_cancelaciones.<32 hex>` (configure,
+#     write para el bind, read para consumir) y la enlaza al exchange (read en
+#     el exchange). NO tiene write en el exchange: un worker no puede publicar
+#     (falsificar) avisos; solo el backend y el chatbot de la VPS lo hacen. Sin
+#     `.*`: los nombres son exactos. Sin estos permisos el consumer sigue
+#     funcionando (solo registra un warning y cancelar no aborta la
+#     generacion); probado el 09-oct-2026 contra un RabbitMQ desechable.
 #
 # Idempotente: si el usuario ya existe, solo actualiza password y
 # permisos (util para rotar la contrasena sin recrear el usuario).
@@ -51,10 +60,13 @@ fi
 docker exec "$CONTAINER" rabbitmqctl set_user_tags "$WORKER_USER"
 
 echo "--- Aplicando permisos minimos en vhost / ---"
+# configure: colas de trabajo + exchange y cola de avisos de cancelacion
+# write:     publicar el evento y la respuesta (amq.default) + bind de la cola de avisos
+# read:      consumir chatbot_requests + leer el exchange y la cola de avisos
 docker exec "$CONTAINER" rabbitmqctl set_permissions -p / "$WORKER_USER" \
-  "^(chatbot_requests|chatbot_eventos_persistencia)?$" \
-  "^(chatbot_requests|chatbot_eventos_persistencia|amq\.default)$" \
-  "^chatbot_requests$"
+  "^(chatbot_requests|chatbot_eventos_persistencia|chatbot_cancelaciones|chatbot_cancelaciones\.[0-9a-f]{32})?$" \
+  "^(chatbot_requests|chatbot_eventos_persistencia|amq\.default|chatbot_cancelaciones\.[0-9a-f]{32})$" \
+  "^(chatbot_requests|chatbot_cancelaciones|chatbot_cancelaciones\.[0-9a-f]{32})$"
 
 echo "--- Verificacion (permisos aplicados, sin exponer password) ---"
 docker exec "$CONTAINER" rabbitmqctl list_user_permissions "$WORKER_USER"
