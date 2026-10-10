@@ -69,8 +69,18 @@ services:
       - pg_principal_data:/var/lib/postgresql/data
     networks:
       - techo360-net
-    mem_limit: 512m
-    cpus: 0.35
+    # memswap_limit = mem_limit en TODOS los servicios (auditoria 2026-10-09): sin
+    # esto Docker deja a cada contenedor usar en swap tanto como su mem_limit (6,25 GiB
+    # en total frente a 4 GiB de swap del host). Con esto ningun contenedor usa swap.
+    mem_limit: 1024m
+    memswap_limit: 1024m
+    # CPU por prioridad (ver README «Presupuesto de recursos»): cpu_shares fija el
+    # reparto SOLO cuando hay contencion; cpus es un tope holgado contra servicios
+    # desbocados, no una cuota ajustada (las cuotas de 0,2-0,35 estrangulaban a los
+    # Postgres un ~36-39 % de sus periodos activos; auditoria del 09-oct).
+    cpus: 2.0
+    cpu_shares: 1024
+    oom_score_adj: -500
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_PRINCIPAL_USER} -d ${DB_PRINCIPAL_NAME}"]
       interval: 10s
@@ -99,7 +109,10 @@ services:
     networks:
       - techo360-net
     mem_limit: 512m
-    cpus: 0.35
+    memswap_limit: 512m
+    cpus: 1.0
+    cpu_shares: 512
+    oom_score_adj: -500
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_VECTOR_USER} -d ${DB_VECTOR_NAME}"]
       interval: 10s
@@ -127,7 +140,10 @@ services:
     networks:
       - techo360-net
     mem_limit: 256m
-    cpus: 0.2
+    memswap_limit: 256m
+    cpus: 0.5
+    cpu_shares: 256
+    oom_score_adj: -500
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USERS_USER} -d ${DB_USERS_NAME}"]
       interval: 10s
@@ -151,8 +167,10 @@ services:
     restart: unless-stopped
     networks:
       - techo360-net
-    mem_limit: 128m
-    cpus: 0.15
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    cpu_shares: 256
     # Cache + OTP, sin necesidad de volumen persistente
 
   rabbitmq:
@@ -167,13 +185,27 @@ services:
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 1:1 +sbwt none +sbwtdcpu none +sbwtdio none"
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq/20-techo360.conf:/etc/rabbitmq/conf.d/20-techo360.conf:ro
     networks:
       - techo360-net
-    mem_limit: 256m
-    cpus: 0.2
+    # Recursos (auditoria 2026-10-09): tocaba su limite de memoria (memory.peak =
+    # 256 MiB, 43 eventos "max", 13 MB en swap) y pasaba ~43 % de sus periodos con
+    # throttling de CPU con un uso medio de 0,048 CPU: Erlang arrancaba 6 schedulers
+    # (ve las 6 CPU del host) con una cuota de 0,2 y gira esperando trabajo (busy-wait).
+    # +S 1:1 = 1 scheduler; +sbwt* none = sin busy-wait. Ver rabbitmq/20-techo360.conf
+    # para el watermark de memoria.
+    # 576m con watermark absoluto de 270 MiB (rabbitmq/20-techo360.conf): con 230 MiB
+    # el pico de una carga de 2000 x 4 KB quedaba al 79-85 % del watermark (prueba local
+    # del 09-oct). mem_limit >= 2 x watermark: Erlang puede pedir el doble al recolectar.
+    mem_limit: 576m
+    memswap_limit: 576m
+    cpus: 1.0
+    cpu_shares: 512
+    oom_score_adj: -200
     # rabbitmq-diagnostics ping no necesita credenciales (chequea el nodo
     # erlang, no una cuenta) -- confirmado real: sin este healthcheck, el
     # backend (depends_on: rabbitmq condition: service_started) podia
@@ -226,12 +258,29 @@ services:
       - ollama_data:/root/.ollama
     networks:
       - techo360-net
-    mem_limit: 3072m
-    # 3.0 (antes 1.0): con 1 CPU el cgroup estrangulaba a Ollama ~60% del tiempo
-    # (nr_throttled 22190/36423) y generaba ~1.3 tokens/s: las respuestas pasaban
-    # de los 120 s de TIMEOUT_OLLAMA_S y el chatbot devolvia 503 (medido 04-oct-2026).
-    # Con 3 CPU: ~5-7 tokens/s. Suma de limites de todos los servicios = 5.3 de las 6 CPU del VPS.
-    cpus: 3.0
+    # Techo de 3328m = pico medido 2,46 GiB x 1,3 (modelo de 2,0 GB cargado; antes 3 GiB
+    # = 82 %). Es un techo, no una reserva: sin modelo cargado Ollama usa ~13 MiB.
+    # OLLAMA_KEEP_ALIVE=5m es el valor por defecto de Ollama, explicito para que el
+    # pico medido (modelo cargado 5 min tras cada uso) no dependa de la version de la imagen.
+    environment:
+      OLLAMA_KEEP_ALIVE: 5m
+    # memswap_limit = mem_limit: sin swap extra (un modelo paginado a disco es
+    # inutilmente lento; mejor un OOM visible que respuestas de minutos).
+    mem_limit: 3328m
+    memswap_limit: 3328m
+    # CPU por PRIORIDAD, no por cuota ajustada (ver README «Presupuesto de recursos»):
+    # cpu_shares 4096 = el mayor de todos; cuando genera y hay contencion, el kernel le da
+    # la mayor parte de la CPU. cpus 5.0 = tope que deja siempre >= 1 nucleo libre.
+    # Historia: 1.0 -> 3.0 el 04-oct (con 1 CPU, ~1,3 tokens/s y timeouts de 120 s).
+    # OJO: el numero de hilos lo fija el chatbot (NUM_THREAD = 3 en app/ollama_client.py,
+    # 05-oct: 4,91 -> 7,46 tokens/s con cpus=3). Mientras siga en 3, Ollama no usara mas de
+    # ~3 nucleos aunque el tope sea 5: subirlo es un cambio del chatbot, medido en la VPS.
+    cpus: 5.0
+    cpu_shares: 4096
+    # oom_score_adj: si el host se queda sin memoria, el kernel mata primero a ollama
+    # (+500: se recarga solo en la siguiente peticion) y protege a los Postgres (-500) y a
+    # rabbitmq y backend (-200). Los demas quedan en 0 (valor por defecto).
+    oom_score_adj: 500
     # Este servidor NO tiene GPU. Si en algun momento se despliega en
     # un servidor con GPU NVIDIA, descomentar:
     # deploy:
@@ -278,8 +327,11 @@ services:
         condition: service_healthy
     networks:
       - techo360-net
-    mem_limit: 512m
-    cpus: 0.3
+    mem_limit: 896m
+    memswap_limit: 896m
+    cpus: 1.5
+    cpu_shares: 1024
+    oom_score_adj: -200
     # Sin puertos publicos: el frontend lo consume internamente por nombre
     # de servicio (proxy_pass http://backend:8000/), segun los puertos
     # aprobados por el CCA (solo 22/80/443/5432 hacia internet).
@@ -324,8 +376,11 @@ services:
         condition: service_started
     networks:
       - techo360-net
-    mem_limit: 512m
-    cpus: 0.3
+    # Techo de 384m (pico medido 45 MiB; el modelo vive en ollama).
+    mem_limit: 384m
+    memswap_limit: 384m
+    cpus: 1.0
+    cpu_shares: 512
     # Sin puertos publicos: mismo criterio que el backend, se consume
     # internamente via el proxy del frontend (proxy_pass http://chatbot:8000/).
 
@@ -372,8 +427,10 @@ services:
         condition: service_healthy
     networks:
       - techo360-net
-    mem_limit: 512m
-    cpus: 0.3
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 1.0
+    cpu_shares: 512
     # Sin puertos publicos: el frontend no la llama directo, solo via
     # RabbitMQ (a traves del backend), segun la arquitectura definida.
 
@@ -406,4 +463,6 @@ services:
     networks:
       - techo360-net
     mem_limit: 128m
-    cpus: 0.15
+    memswap_limit: 128m
+    cpus: 0.5
+    cpu_shares: 256
