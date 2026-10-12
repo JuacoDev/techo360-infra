@@ -402,7 +402,10 @@ services:
       - chatbot
     ports:
       - "80:80"
-      # - "443:443"  # descomentar cuando el CTIC entregue el DNS y haya certificado TLS
+      - "443:443"
+    volumes:
+      # Certificado autofirmado (generado con openssl, no versionado: ver certs/ en .gitignore)
+      - ./certs:/etc/nginx/certs:ro
     networks:
       - techo360-net
     mem_limit: 128m
