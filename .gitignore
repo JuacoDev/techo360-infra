@@ -6,3 +6,7 @@ backups/
 logs/
 *.sql.gz
 *.log
+
+# Certificados y llaves TLS (nunca se suben)
+certs/
+*.key
