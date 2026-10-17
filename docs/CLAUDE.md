@@ -44,11 +44,14 @@ Hay dos vías, y ninguna sustituye a la autorización del usuario para escribir:
    22, 80, 443, 5432 (+ ping/snmp). Por eso **solo `techo360-frontend` expone puerto**
    — corre Nginx como reverse proxy (`/api/` → backend, `/chatbot/` → chatbot, dentro
    de la red Docker). Backend y chatbot nunca exponen su propio puerto directamente.
-2. **CTIC** (TI de la universidad) todavía no entregó el dominio institucional
-   `techo360.bucaramanga.upb.edu.co` — esto bloquea autenticación de dominio de email
-   (Brevo, SPF/DKIM) y el mapeo `443:443` del frontend (queda comentado en
-   docker-compose hasta que haya DNS/TLS). No asumir que el dominio ya está vivo sin
-   confirmarlo.
+2. **Dominio y TLS**: el dominio institucional `techo360.bucaramanga.upb.edu.co` **ya
+   resuelve** a la IP del VPS (registro A, comprobado el 16-oct-2026 contra DNS público; sin
+   AAAA ni CAA) y el `443:443` del frontend está publicado desde el 12-oct. Hasta el 16-oct el
+   443 sirvió un certificado autofirmado (CN=localhost); el paso a Let's Encrypt (HTTP-01,
+   certbot en contenedor efímero, renovación por cron) está descrito en
+   `techo360-infra/docs/certificado-letsencrypt.md` — verificar el certificado que se sirve
+   en vez de asumirlo. **Sigue sin confirmarse con CTIC** la autenticación de dominio de
+   email (Brevo, SPF/DKIM): no darla por hecha.
 3. VPS: 6 CPU y 11 GiB de RAM (medido el 5-oct-2026 con `nproc` y `free`), **sin GPU** —
    Ollama en producción corre un modelo pequeño (~3B parámetros o menos) con una cuota
    de 3 CPU y 3 GiB. La suma de los límites de CPU de los contenedores es 5,3 de las 6.

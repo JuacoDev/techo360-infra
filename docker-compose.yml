@@ -404,8 +404,15 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      # Certificado autofirmado (generado con openssl, no versionado: ver certs/ en .gitignore)
+      # Certificado autofirmado (generado con openssl, no versionado: ver certs/ en .gitignore).
+      # Se CONSERVA como respaldo aunque nginx pase al de Let's Encrypt.
       - ./certs:/etc/nginx/certs:ro
+      # Let's Encrypt (docs/certificado-letsencrypt.md). Ambas carpetas viven en el VPS, no
+      # se versionan (certbot/ en .gitignore) y deben existir ANTES de recrear el contenedor:
+      #   certbot/conf -> certificados emitidos (llaves privadas; las escribe certbot, root)
+      #   certbot/www  -> webroot del reto HTTP-01 (/.well-known/acme-challenge/ en el puerto 80)
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
     networks:
       - techo360-net
     mem_limit: 128m
