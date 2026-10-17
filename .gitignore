@@ -10,3 +10,6 @@ logs/
 # Certificados y llaves TLS (nunca se suben)
 certs/
 *.key
+
+# Let's Encrypt: certificados, llaves privadas y webroot (solo en el VPS)
+certbot/
