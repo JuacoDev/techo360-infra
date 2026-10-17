@@ -46,12 +46,15 @@ Hay dos vías, y ninguna sustituye a la autorización del usuario para escribir:
    de la red Docker). Backend y chatbot nunca exponen su propio puerto directamente.
 2. **Dominio y TLS**: el dominio institucional `techo360.bucaramanga.upb.edu.co` **ya
    resuelve** a la IP del VPS (registro A, comprobado el 16-oct-2026 contra DNS público; sin
-   AAAA ni CAA) y el `443:443` del frontend está publicado desde el 12-oct. Hasta el 16-oct el
-   443 sirvió un certificado autofirmado (CN=localhost); el paso a Let's Encrypt (HTTP-01,
-   certbot en contenedor efímero, renovación por cron) está descrito en
-   `techo360-infra/docs/certificado-letsencrypt.md` — verificar el certificado que se sirve
-   en vez de asumirlo. **Sigue sin confirmarse con CTIC** la autenticación de dominio de
-   email (Brevo, SPF/DKIM): no darla por hecha.
+   AAAA ni CAA) y el `443:443` del frontend está publicado desde el 12-oct. El 443 **sigue
+   sirviendo el certificado autofirmado** (CN=localhost; los navegadores avisan). El intento
+   de Let's Encrypt (HTTP-01) del 17-oct falló en *staging* con «Timeout during connect»:
+   el puerto 80 responde desde algunas redes pero los validadores de Let's Encrypt no lo
+   alcanzan (probable filtro del lado de la universidad/CCA). Pendiente: que CTIC/CCA abra el
+   80 a internet, o validar por DNS-01 con ayuda de CTIC. nginx y el compose ya quedaron
+   listos (reto ACME, mounts de certbot); detalle y reversa en
+   `techo360-infra/docs/certificado-letsencrypt.md`. **Sigue sin confirmarse con CTIC** la
+   autenticación de dominio de email (Brevo, SPF/DKIM): no darla por hecha.
 3. VPS: 6 CPU y 11 GiB de RAM (medido el 5-oct-2026 con `nproc` y `free`), **sin GPU** —
    Ollama en producción corre un modelo pequeño (~3B parámetros o menos) con una cuota
    de 3 CPU y 3 GiB. La suma de los límites de CPU de los contenedores es 5,3 de las 6.
