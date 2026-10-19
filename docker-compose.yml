@@ -229,7 +229,10 @@ services:
     # 4096m (antes 3072m), A9 del 2026-10-19: con 3 GiB el modelo 0.4.0 (ctx 3072) llego a 2,975 GiB anon
     # en el VPS (fase5-9b). El host tiene ~9,8 GiB disponibles. NO se define memswap_limit (Docker lo fija en 2x).
     # Reversa: mem_limit 3072m y recrear solo ollama.
-    mem_limit: 4096m
+    # 5120m (antes 4096m), A1 del 2026-10-19: con 4 GiB la anon del modelo 0.4.0 (ctx 3072) pasaba de 3,495 GiB tras 10 peticiones
+    # sin estabilizarse (pico_ram_r2). Host: 11.953 MiB, ~9.960 disponibles; con 5 GiB reservados quedan ~4,7 GiB (3,4 GiB en el peor caso:
+    # suma de limites de los demas servicios). Reversa a 4096m: mem_limit 4096m y recrear solo ollama.
+    mem_limit: 5120m
     environment:
       OLLAMA_NUM_PARALLEL: "1"
       OLLAMA_MAX_LOADED_MODELS: "1"
