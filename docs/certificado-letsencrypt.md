@@ -4,6 +4,21 @@ El nginx del contenedor `techo360-frontend` termina TLS en el 443 para
 `techo360.bucaramanga.upb.edu.co`. Hasta el 16-oct-2026 usaba un certificado
 autofirmado (`certs/`, CN=localhost); ese archivo se **conserva** como respaldo.
 
+## Estado (17-oct-2026): emisión NO realizada
+
+El *staging* falló: `Timeout during connect (likely firewall problem)` al pedir
+`http://techo360.bucaramanga.upb.edu.co/.well-known/acme-challenge/<token>` desde Let's Encrypt.
+nginx no registró ninguna petición del validador (solo las pruebas propias): el tráfico no llegó
+al VPS. Desde otras redes el puerto 80 sí responde, así que el filtro parece estar del lado de la
+universidad/CCA (HIPÓTESIS; `ufw`/`iptables` no son visibles sin sudo). No se emitió el
+certificado real, no se instaló el cron y el 443 sigue con el autofirmado.
+Para reintentar: abrir el 80 a internet (CCA/CTIC) y repetir "Emisión"; o usar DNS-01 (requiere
+crear un TXT `_acme-challenge` en la zona de la universidad). Cuando haya certificado: cambiar
+`ssl_certificate`/`ssl_certificate_key` de `nginx.conf` (frontend) a
+`/etc/letsencrypt/live/techo360.bucaramanga.upb.edu.co/{fullchain,privkey}.pem`, comprobar con
+`nginx -t` en un contenedor efímero y desplegar el frontend; luego instalar el cron de
+`scripts/renovar-certificado.sh` y probar `--dry-run`.
+
 ## Piezas
 
 | Pieza | Dónde | Notas |
