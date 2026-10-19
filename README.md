@@ -1,5 +1,72 @@
 # techo360-infra
 
+## Resumen
+
+Orquesta los contenedores de Techo 360 con Docker Compose.
+Conecta frontend, backend, chatbot y proyeccion.
+Administra tres PostgreSQL, Redis, RabbitMQ y Ollama.
+Incluye scripts de despliegue, rollback, backups y congelado de tags.
+No contiene el codigo de aplicacion de los servicios.
+
+## Uso local
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+docker compose ps
+```
+
+No se deben guardar contrasenas ni tokens en git. Para la base aislada:
+
+```bash
+docker compose -f docker-compose.dev-db.yml up -d
+```
+
+## Variables de entorno
+
+Las variables se leen desde `.env.example`, Docker Compose y los scripts.
+Incluyen `TAG`, nombres/usuarios/contrasenas de PostgreSQL, credenciales de
+RabbitMQ, `WORKER_RABBITMQ_PASSWORD`, variables de backup y variables de la
+base de desarrollo. `TODO`: publicar aqui la tabla completa de nombre,
+proposito y default tras revisar `.env.example`, sin copiar secretos.
+
+## Pruebas
+
+```bash
+docker compose config
+docker compose ps
+```
+
+Las pruebas operativas adicionales estan en los scripts y workflows. `TODO`:
+definir una suite automatizada de infraestructura reproducible.
+
+## Estructura
+
+`docker-compose.yml` orquesta produccion; `docker-compose.dev-db.yml` crea la
+base aislada; `db-init/` inicializa bases; `scripts/` despliega, respalda y
+revierte; `certs/`, `docs/` y `workflow-templates/` contienen soporte.
+
+## Servicios y memoria de Ollama
+
+El compose define `postgres-principal` (PostGIS), `postgres-vector`
+(pgvector), `postgres-users`, `redis`, `rabbitmq`, `ollama`, `backend`,
+`chatbot`, `proyeccion` y `frontend` con Nginx. Backend y chatbot son internos;
+frontend sirve la SPA y hace reverse proxy.
+
+Ollama usa `mem_limit: 5120m`, `cpus: 3.0`,
+`OLLAMA_NUM_PARALLEL=1` y `OLLAMA_MAX_LOADED_MODELS=1` en la base `Testing` de
+esta rama.
+
+## Banderas del chatbot
+
+Las banderas de habilitacion de rutas auxiliares y documentacion deben estar
+apagadas por defecto. `TODO`: verificar sus nombres y valores efectivos en el
+compose de esta rama sin exponer valores del `.env`.
+
+## Documentacion de fases
+
+La documentacion de fases se mantiene fuera de este repositorio.
+
 Este repositorio contiene la orquestación de contenedores y los scripts de
 despliegue para el proyecto **Techo 360**. No contiene código de aplicación:
 ese vive en los otros 4 repos (`techo360-frontend`, `techo360-backend`,
@@ -147,7 +214,7 @@ El VPS del CCA **no tiene GPU** (8GB RAM, 2 cores). Ollama corriendo por CPU
 con un modelo de 7-8B parámetros puede saturar la memoria disponible una vez
 sumadas las 3 bases de datos, RabbitMQ, los 3 microservicios y el frontend.
 
-Por eso el contenedor de `ollama` tiene un límite de `3072m` y **se recomienda
+Por eso el contenedor de `ollama` tiene un límite de `5120m` y **se recomienda
 usar un modelo pequeño (1-3B, ej. `llama3.2:3b` o `phi3:mini`) para lo que
 corra en producción en este servidor**. El entrenamiento/experimentación con
 modelos más grandes se hace en las GPUs locales del equipo (3050, 5060, RTX
