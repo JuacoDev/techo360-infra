@@ -277,6 +277,13 @@ services:
       DATABASE_VECTOR_URL: postgresql://${DB_VECTOR_USER}:${DB_VECTOR_PASSWORD}@postgres-vector:5432/${DB_VECTOR_NAME}
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      # 7.8 / A7 (2026-10-20): modelo 0.4.1. Los tres van JUNTOS con OLLAMA_MODEL del chatbot: 0.4.1 se entreno con el system
+      # sp-0.4.1-1, contexto CONTEXTO/PREGUNTA (orquestador) e historial de 2 intercambios. CHATBOT_RAG_ACTIVO NO se define (apagado:
+      # la migracion 0005 y el plan 6.8 siguen sin ejecutar). Reversa rapida: CHATBOT_HISTORIAL_ACTIVO "false" (queda 0.4.1 sin
+      # historial) o, juntos, OLLAMA_MODEL v3.2 + quitar estas tres variables (vuelve al camino v1 de antes) y recrear backend y chatbot.
+      CHATBOT_ORQUESTADOR_ACTIVO: "true"
+      CHATBOT_HISTORIAL_ACTIVO: "true"
+      CHATBOT_SYSTEM_VERSION: "sp-0.4.1-1"
     depends_on:
       postgres-principal:
         condition: service_healthy
@@ -329,6 +336,9 @@ services:
       # demas valores de despliegue, ver techo360-workers/README.md para
       # la prioridad alta que usan los workers de laboratorio.
       CHATBOT_CONSUMER_PRIORITY: "0"
+      # 7.8 / A6 (2026-10-20): modelo servido. Antes sin definir = default del codigo (techo360-chatbot:v3.2). Los tags v3.2 y
+      # v0.4.0 siguen en Ollama: reversa = poner de nuevo techo360-chatbot:v3.2 (o borrar la variable) y recrear solo chatbot.
+      OLLAMA_MODEL: "techo360-chatbot:v0.4.1"
     depends_on:
       rabbitmq:
         condition: service_healthy
