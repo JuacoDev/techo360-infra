@@ -284,6 +284,9 @@ services:
       CHATBOT_ORQUESTADOR_ACTIVO: "true"
       CHATBOT_HISTORIAL_ACTIVO: "true"
       CHATBOT_SYSTEM_VERSION: "sp-0.4.1-1"
+      # 8 / RAG etapa 2 (2026-10-20): RAG curado (corpus de 6 documentos y 42 fragmentos, migracion 0005 aplicada). Recuperador de texto
+      # completo de Postgres, sin modelo de embeddings en el backend. Reversa: "false" o quitar la linea y recrear SOLO el backend.
+      CHATBOT_RAG_ACTIVO: "true"
     depends_on:
       postgres-principal:
         condition: service_healthy
